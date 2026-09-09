@@ -3,6 +3,7 @@ import { DealSheet, FIELD_DEFS, SECTIONS, DEFAULT_POLICY, Policy, underwrite, Fi
 import { API_URL, STEPS, extractMemo } from './api'
 import { loans } from './data'
 import { Ico } from './Icons'
+import { supabase, Org } from './supabase'
 
 type Phase = { kind: 'idle' } | { kind: 'running'; step: number; name: string } | { kind: 'done'; deal: DealSheet } | { kind: 'error'; msg: string }
 
@@ -15,7 +16,7 @@ const fmt = (f: Field | undefined, kind?: string) => {
   return n.toLocaleString()
 }
 
-export default function Screener() {
+export default function Screener({ org }: { org: Org | null }) {
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' })
   const [policy, setPolicy] = useState<Policy>(DEFAULT_POLICY)
   const [drag, setDrag] = useState(false)
@@ -77,30 +78,49 @@ export default function Screener() {
         </div>
       )}
 
-      {phase.kind === 'done' && <Results deal={phase.deal} policy={policy} setPolicy={setPolicy} reset={() => setPhase({ kind: 'idle' })} />}
+      {phase.kind === 'done' && <Results deal={phase.deal} org={org} policy={policy} setPolicy={setPolicy} reset={() => setPhase({ kind: 'idle' })} />}
     </>
   )
 }
 
-function Results({ deal, policy, setPolicy, reset }: { deal: DealSheet; policy: Policy; setPolicy: (p: Policy) => void; reset: () => void }) {
+function Results({ deal, org, policy, setPolicy, reset }: { deal: DealSheet; org: Org | null; policy: Policy; setPolicy: (p: Policy) => void; reset: () => void }) {
   const metrics = underwrite(deal.fields, policy)
   const fails = metrics.filter(m => m.status === 'fail').length
   const lowConf = Object.values(deal.fields).filter(f => f.confidence < 0.9).length
   const [added, setAdded] = useState(false)
 
-  const addToPipeline = () => {
+  const addToPipeline = async () => {
     const g = (k: string) => deal.fields[k]
-    const id = `CL-2026-${String(80 + loans.length).padStart(3, '0')}`
-    const ltv = metrics[0].value, dscr = metrics[1].value
+    const ltvS = metrics[0].value, dscrS = metrics[1].value
+    const sponsor = g('sponsor')?.text?.split(' (')[0] ?? 'New sponsor'
+    const rate = g('rate_request')?.text?.split(' or ')[0] ?? null
+    const term = g('loan_term')?.text?.replace(/-year term \/ /, ' / ').replace(/-year amortization/, '') ?? null
+    const ltv = ltvS === '—' ? null : parseFloat(ltvS) / 100
+    const dscr = dscrS === '—' ? null : parseFloat(dscrS)
+    setAdded(true)
+
+    if (org) {
+      // Signed in: the deal becomes a real loan (and customer) in the org's book.
+      const { data: cust } = await supabase.from('customers')
+        .insert({ org_id: org.id, name: g('guarantor')?.text?.split(' (')[0] ?? sponsor, company: sponsor })
+        .select().single()
+      await supabase.from('loans').insert({
+        org_id: org.id, customer_id: cust?.id ?? null,
+        loan_number: `CL-${new Date().getFullYear()}-${String(Math.floor(100 + Math.random() * 900))}`,
+        type: 'Investor CRE', stage: 'Application', amount: g('loan_amount')?.number ?? 0,
+        rate, term, ltv, dscr, collateral: `1st DOT — ${g('property_name')?.text ?? 'property'}`, rm: 'Unassigned',
+      })
+      window.location.hash = '#/app'
+      return
+    }
+
     loans.unshift({
-      id, borrower: g('sponsor')?.text?.split(' (')[0] ?? 'New sponsor', type: 'Investor CRE',
+      id: `CL-2026-${String(80 + loans.length).padStart(3, '0')}`, borrower: sponsor, type: 'Investor CRE',
       amount: g('loan_amount')?.number ?? 0, stage: 'Application', rm: 'Unassigned', riskRating: 0,
       nextAction: `Screened from ${deal.source.filename} — ${fails ? `${fails} policy flag${fails > 1 ? 's' : ''}` : 'passes policy'}`,
-      rate: g('rate_request')?.text?.split(' or ')[0] ?? '—', term: g('loan_term')?.text?.replace(/-year term \/ /, ' / ').replace(/-year amortization/, '') ?? '—',
-      ltv: ltv === '—' ? null : parseFloat(ltv), dscr: dscr === '—' ? null : parseFloat(dscr),
+      rate: rate ?? '—', term: term ?? '—', ltv: ltv === null ? null : ltv * 100, dscr,
       maturity: '—', collateral: `1st DOT — ${g('property_name')?.text ?? 'property'}`,
     })
-    setAdded(true)
     window.location.hash = '#/portfolio'
   }
 
