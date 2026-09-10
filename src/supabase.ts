@@ -8,10 +8,17 @@ export const supabase = createClient(
 
 export type Org = { id: string; name: string; invite_code: string }
 export type Customer = { id: string; name: string; company: string | null; email: string | null; phone: string | null }
+export type PaymentType = 'P&I' | 'I/O' | 'Deferred' | 'I/O Deferred' | 'Construction'
 export type DbLoan = {
   id: string; loan_number: string; type: string; stage: string; amount: number; rate: string | null
   term: string | null; ltv: number | null; dscr: number | null; maturity: string | null
-  collateral: string | null; rm: string | null; customers: { name: string; company: string | null } | null
+  collateral: string | null; rm: string | null; payment_type: PaymentType
+  draw_period_end: string | null; origination_date: string | null; customer_id: string | null
+  customers: { name: string; company: string | null; email: string | null; phone: string | null } | null
+}
+export type ShareLink = {
+  id: string; token: string; institution: string; expires_at: string; revoked: boolean
+  access_count: number; last_accessed_at: string | null; created_at: string
 }
 export type Deposit = { id: string; account_name: string; type: string; balance: number; opened: string | null; customers: { company: string | null; name: string } | null }
 export type CreditLine = { id: string; name: string; commitment: number; outstanding: number; rate: string | null; maturity: string | null; customers: { company: string | null; name: string } | null }

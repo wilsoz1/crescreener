@@ -4,6 +4,9 @@ import Screener from './Screener'
 import Portfolio from './Portfolio'
 import LoanDetail from './LoanDetail'
 import Dashboard from './Dashboard'
+import Loans from './Loans'
+import LoanPage from './LoanPage'
+import SharePage from './SharePage'
 import Outreach from './Outreach'
 import Documents from './Documents'
 import { SignIn, Onboarding } from './Auth'
@@ -25,13 +28,23 @@ export default function App() {
   const hash = useHash()
   const app = useSession()
   const route = hash.replace(/^#\//, '')
-  const [section, sub] = route.split('/')
+  const [section, sub, subId] = route.split('/')
   const authed = !!app.session
 
   // Auth-only sections bounce to sign-in.
   useEffect(() => {
     if (!app.loading && section === 'app' && !authed) window.location.hash = '#/signin'
   }, [app.loading, section, authed])
+
+  // Public share links render standalone — no app chrome, no auth. (After all hooks.)
+  if (section === 'share' && sub) {
+    return (
+      <>
+        <div className="window-title">CRE Screener</div>
+        <div className="frame"><SharePage token={sub} /></div>
+      </>
+    )
+  }
 
   const appTab = section === 'app' ? (sub ?? 'dashboard') : null
 
@@ -45,6 +58,7 @@ export default function App() {
             {authed && app.org ? (
               <>
                 <a href="#/app" className={appTab === 'dashboard' ? 'on' : ''}>Dashboard</a>
+                <a href="#/app/loans" className={appTab === 'loans' ? 'on' : ''}>Loans</a>
                 <a href="#/app/screener" className={appTab === 'screener' ? 'on' : ''}>Screener</a>
                 <a href="#/app/outreach" className={appTab === 'outreach' ? 'on' : ''}>Outreach</a>
                 <a href="#/app/docs" className={appTab === 'docs' ? 'on' : ''}>Documents</a>
@@ -80,6 +94,8 @@ export default function App() {
             app.loading ? <p className="subtitle">Loading…</p>
             : !authed ? null
             : !app.org ? <Onboarding app={app} />
+            : appTab === 'loans' && subId ? <LoanPage org={app.org} loanId={subId} />
+            : appTab === 'loans' ? <Loans org={app.org} />
             : appTab === 'screener' ? <Screener org={app.org} />
             : appTab === 'outreach' ? <Outreach org={app.org} />
             : appTab === 'docs' ? <Documents org={app.org} />

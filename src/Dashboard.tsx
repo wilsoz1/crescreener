@@ -51,12 +51,12 @@ export default function Dashboard({ org }: { org: Org }) {
       </div>
 
       <div className="grid" style={{ marginBottom: 20 }}>
-        <div className="uw-head"><span><b>Loans</b></span></div>
+        <div className="uw-head"><span><b>Loans</b></span><a href="#/app/loans" className="small" style={{ color: 'var(--accent)' }}>View all loans with filters →</a></div>
         <table>
           <thead><tr><th>Loan</th><th>Borrower</th><th>Type</th><th>Stage</th><th className="num">Amount</th><th>Rate</th><th className="num">LTV</th><th className="num">DSCR</th><th>Maturity</th><th>RM</th></tr></thead>
           <tbody>
             {loans.map(l => (
-              <tr key={l.id}>
+              <tr key={l.id} className="rowlink" onClick={() => (window.location.hash = `#/app/loans/${l.id}`)}>
                 <td className="mono">{l.loan_number}</td>
                 <td className="ellipsis">{l.customers?.company ?? l.customers?.name ?? '—'}</td>
                 <td>{l.type}</td>
