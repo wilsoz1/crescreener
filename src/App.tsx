@@ -7,8 +7,6 @@ import Dashboard from './Dashboard'
 import Loans from './Loans'
 import LoanPage from './LoanPage'
 import SharePage from './SharePage'
-import Outreach from './Outreach'
-import Documents from './Documents'
 import { SignIn, Onboarding } from './Auth'
 import { useSession } from './useSession'
 import { supabase } from './supabase'
@@ -60,8 +58,6 @@ export default function App() {
                 <a href="#/app" className={appTab === 'dashboard' ? 'on' : ''}>Dashboard</a>
                 <a href="#/app/loans" className={appTab === 'loans' ? 'on' : ''}>Loans</a>
                 <a href="#/app/screener" className={appTab === 'screener' ? 'on' : ''}>Screener</a>
-                <a href="#/app/outreach" className={appTab === 'outreach' ? 'on' : ''}>Outreach</a>
-                <a href="#/app/docs" className={appTab === 'docs' ? 'on' : ''}>Documents</a>
               </>
             ) : (
               <>
@@ -97,8 +93,6 @@ export default function App() {
             : appTab === 'loans' && subId ? <LoanPage org={app.org} loanId={subId} />
             : appTab === 'loans' ? <Loans org={app.org} />
             : appTab === 'screener' ? <Screener org={app.org} />
-            : appTab === 'outreach' ? <Outreach org={app.org} />
-            : appTab === 'docs' ? <Documents org={app.org} />
             : <Dashboard org={app.org} />
           )}
         </div>

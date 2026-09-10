@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase, DbLoan, Doc, Org, ShareLink, Attempt, Payment, DbCovenant, DbTickler, Guarantor, Note, money, daysLate } from './supabase'
 import { fmtDate } from './Loans'
+import { classifyType } from './Documents'
 import { Ico } from './Icons'
 
 const shareUrl = (token: string) => `${window.location.origin}/#/share/${token}`
@@ -123,8 +124,8 @@ export default function LoanPage({ org, loanId }: { org: Org; loanId: string }) 
       {tab === 'Payments' && <PaymentsTab loan={loan} payments={payments} />}
       {tab === 'Compliance' && <ComplianceTab covenants={covenants} ticklers={ticklers} />}
       {tab === 'Structure' && <StructureTab loan={loan} guarantors={guarantors} />}
-      {tab === 'Documents' && <DocumentsTab docs={docs} links={links} onChange={load} />}
-      {tab === 'Activity' && <ActivityTab org={org} loanId={loanId} notes={notes} outreach={outreach} onChange={load} />}
+      {tab === 'Documents' && <DocumentsTab org={org} loan={loan} docs={docs} links={links} onChange={load} />}
+      {tab === 'Activity' && <ActivityTab org={org} loan={loan} notes={notes} outreach={outreach} onChange={load} />}
     </>
   )
 }
@@ -304,12 +305,42 @@ function StructureTab({ loan, guarantors }: { loan: DbLoan; guarantors: Guaranto
   )
 }
 
-// ——— Documents: files + share links ———
-const DocumentsTab = ({ docs, links, onChange }: { docs: Doc[]; links: ShareLink[]; onChange: () => void }) => {
+// ——— Documents: per-loan upload + files + share links ———
+const DocumentsTab = ({ org, loan, docs, links, onChange }: { org: Org; loan: DbLoan; docs: Doc[]; links: ShareLink[]; onChange: () => void }) => {
+  const [busy, setBusy] = useState<string | null>(null)
+  const [drag, setDrag] = useState(false)
   const revoke = async (id: string) => { await supabase.from('share_links').update({ revoked: true }).eq('id', id); onChange() }
+
+  const upload = async (files: FileList | File[]) => {
+    for (const file of Array.from(files)) {
+      setBusy(file.name)
+      const { docType, confidence } = classifyType(file.name)
+      const path = `${org.id}/${crypto.randomUUID()}-${file.name}`
+      const { error } = await supabase.storage.from('documents').upload(path, file)
+      if (!error) {
+        await supabase.from('documents').insert({
+          org_id: org.id, loan_id: loan.id, customer_id: loan.customer_id,
+          filename: file.name, storage_path: path, doc_type: docType, confidence, status: 'routed',
+        })
+      }
+    }
+    setBusy(null)
+    onChange()
+  }
+
   return (
     <div className="two-col">
       <Card title="Documents" sub={`${docs.length} on this loan`}>
+        <label
+          className={`drop slim ${drag ? 'drag' : ''}`} style={{ margin: 12, marginBottom: 4 }}
+          onDragOver={e => { e.preventDefault(); setDrag(true) }}
+          onDragLeave={() => setDrag(false)}
+          onDrop={e => { e.preventDefault(); setDrag(false); upload(e.dataTransfer.files) }}
+        >
+          <input type="file" multiple hidden onChange={e => e.target.files && upload(e.target.files)} />
+          {busy ? <span className="small"><span className="spin" style={{ display: 'inline-block', verticalAlign: -2 }} /> Uploading {busy}…</span>
+            : <><Ico.doc /> <b>Drop files for this loan</b> <span className="small">classified on upload, filed directly here</span></>}
+        </label>
         <table><tbody>
           {docs.map(d => (
             <tr key={d.id}>
@@ -318,7 +349,7 @@ const DocumentsTab = ({ docs, links, onChange }: { docs: Doc[]; links: ShareLink
               <td className="small mono">{new Date(d.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
             </tr>
           ))}
-          {!docs.length && <tr><td className="small">None yet — drop files on <a href="#/app/docs">Documents</a>.</td></tr>}
+          {!docs.length && <tr><td className="small">None yet — drop files above, or use portfolio-wide routing on the Dashboard's Operations tab.</td></tr>}
         </tbody></table>
       </Card>
       <Card title="Share links" sub="every access is logged">
@@ -346,15 +377,51 @@ const DocumentsTab = ({ docs, links, onChange }: { docs: Doc[]; links: ShareLink
   )
 }
 
-// ——— Activity: note composer + merged communications record ———
-function ActivityTab({ org, loanId, notes, outreach, onChange }: { org: Org; loanId: string; notes: Note[]; outreach: Attempt[]; onChange: () => void }) {
+// ——— Activity: send outreach + note composer + merged communications record ———
+function Compose({ org, loan, onSent }: { org: Org; loan: DbLoan; onSent: () => void }) {
+  const [channel, setChannel] = useState<'email' | 'sms'>('email')
+  const [subject, setSubject] = useState('')
+  const [body, setBody] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const recipient = channel === 'email' ? loan.customers?.email : loan.customers?.phone
+
+  const send = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!recipient) { setErr(`No ${channel === 'email' ? 'email address' : 'phone number'} on file for this borrower.`); return }
+    setBusy(true); setErr(null)
+    const { data, error } = await supabase.functions.invoke('send-outreach', {
+      body: { org_id: org.id, customer_id: loan.customer_id, channel, recipient, subject: channel === 'email' ? subject : null, body },
+    })
+    setBusy(false)
+    if (error || data?.error) { setErr(error?.message ?? data.error); return }
+    setSubject(''); setBody('')
+    onSent()
+  }
+
+  return (
+    <form className="compose-inline" onSubmit={send}>
+      <div className="seg" style={{ width: 220 }}>
+        <button type="button" className={channel === 'email' ? 'on' : ''} onClick={() => setChannel('email')}>Email</button>
+        <button type="button" className={channel === 'sms' ? 'on' : ''} onClick={() => setChannel('sms')}>Text</button>
+      </div>
+      <span className="small mono">to {recipient ?? `no ${channel} on file`}</span>
+      {channel === 'email' && <input placeholder="Subject" value={subject} onChange={e => setSubject(e.target.value)} />}
+      <input required placeholder={channel === 'sms' ? 'Text message…' : 'Message…'} value={body} onChange={e => setBody(e.target.value)} style={{ flex: 2 }} />
+      <button className="btn-dark" disabled={busy}>{busy ? 'Sending…' : 'Send'}</button>
+      {err && <span className="small" style={{ color: 'var(--red)', flexBasis: '100%' }}>{err}</span>}
+    </form>
+  )
+}
+
+function ActivityTab({ org, loan, notes, outreach, onChange }: { org: Org; loan: DbLoan; notes: Note[]; outreach: Attempt[]; onChange: () => void }) {
   const [body, setBody] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
   const add = async (e: React.FormEvent) => {
     e.preventDefault()
     const user = (await supabase.auth.getUser()).data.user
     await supabase.from('loan_notes').insert({
-      org_id: org.id, loan_id: loanId, body,
+      org_id: org.id, loan_id: loan.id, body,
       author: (user?.user_metadata?.full_name as string) ?? user?.email ?? 'Unknown',
       created_by: user?.id,
     })
@@ -373,8 +440,9 @@ function ActivityTab({ org, loanId, notes, outreach, onChange }: { org: Org; loa
   ].sort((a, b) => (a.at < b.at ? 1 : -1))
 
   return (
-    <Card title="Notes & activity" sub="calls, notes, and every outreach attempt — one record">
+    <Card title="Notes & activity" sub="send outreach, log calls — one record per borrower">
       <div className="notes">
+        <Compose org={org} loan={loan} onSent={onChange} />
         <form onSubmit={add} className="note-form">
           <input required placeholder="Add a note — e.g. 'Called borrower re: Aug payment; promised funds by 9/15'" value={body} onChange={e => setBody(e.target.value)} />
           <button className="btn-dark">Add</button>

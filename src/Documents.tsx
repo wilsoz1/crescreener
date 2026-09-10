@@ -18,6 +18,11 @@ const RULES: [string, RegExp][] = [
   ['Financial Statement', /financial|balance[\s_-]?sheet|income|t-?12|operating[\s_-]?statement|interim/i],
 ]
 
+export const classifyType = (filename: string) => {
+  const hit = RULES.find(([, re]) => re.test(filename))
+  return { docType: hit?.[0] ?? 'Unclassified', confidence: hit ? 0.9 : 0.4 }
+}
+
 function classify(filename: string, loans: LoanLite[]) {
   const hit = RULES.find(([, re]) => re.test(filename))
   const docType = hit?.[0] ?? 'Unclassified'
@@ -29,6 +34,7 @@ function classify(filename: string, loans: LoanLite[]) {
   return { docType, loan, confidence: (hit ? 0.6 : 0.2) + (loan ? 0.35 : 0) }
 }
 
+// Embedded in the Dashboard's Operations tab; per-loan uploads live on each loan's Documents tab.
 export default function Documents({ org }: { org: Org }) {
   const [docs, setDocs] = useState<Doc[]>([])
   const [loans, setLoans] = useState<LoanLite[]>([])
@@ -72,9 +78,6 @@ export default function Documents({ org }: { org: Org }) {
 
   return (
     <>
-      <h1>Documents</h1>
-      <p className="subtitle">Drop anything here — tax returns, rent rolls, insurance certs. Files are classified and routed to the right loan automatically; anything ambiguous lands in review.</p>
-
       <div
         className={`drop slim ${drag ? 'drag' : ''}`}
         onDragOver={e => { e.preventDefault(); setDrag(true) }}
