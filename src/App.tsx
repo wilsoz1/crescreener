@@ -51,7 +51,7 @@ export default function App() {
       <div className="window-title">CRE Screener</div>
       <div className="frame">
         <header className="topbar">
-          <a className="brand" href="#/" style={{ color: 'inherit' }}><Ico.logo /></a>
+          <a className="brand" href="#/" aria-label="CRE Screener home" style={{ color: 'inherit' }}><Ico.logo /></a>
           <nav className="navlinks">
             {authed && app.org ? (
               <>

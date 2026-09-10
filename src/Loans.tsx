@@ -81,7 +81,7 @@ export default function Loans({ org }: { org: Org }) {
       <div className="filters">
         <div className="f-group">
           <span className="f-label"><Ico.clock /> Draw period ends by</span>
-          <input type="date" value={f.drawEndBy} onChange={e => setF({ ...f, drawEndBy: e.target.value })} />
+          <input type="date" aria-label="Draw period ends by" value={f.drawEndBy} onChange={e => setF({ ...f, drawEndBy: e.target.value })} />
         </div>
         <div className="f-group">
           <span className="f-label"><Ico.tag /> Payment</span>
@@ -112,8 +112,8 @@ export default function Loans({ org }: { org: Org }) {
               const pd = pastDueOf(payments, l.id)
               return (
                 <tr key={l.id} className="rowlink" onClick={() => (window.location.hash = `#/app/loans/${l.id}`)}>
-                  <td className="mono">{l.loan_number}</td>
-                  <td className="ellipsis">{l.customers?.company ?? '—'}</td>
+                  <td className="mono"><a className="cell-link" href={`#/app/loans/${l.id}`}>{l.loan_number}</a></td>
+                  <td className="ellipsis" title={l.customers?.company ?? undefined}>{l.customers?.company ?? '—'}</td>
                   <td>{l.type}</td>
                   <td><span className={`status ${stageCls[l.stage] ?? 's-gray'}`}>{l.stage === 'Servicing' ? 'Active' : l.stage}</span></td>
                   <td><span className={`status ${payCls[l.payment_type]}`}>{l.payment_type}</span></td>

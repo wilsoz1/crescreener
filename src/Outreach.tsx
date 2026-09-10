@@ -33,7 +33,7 @@ export function QueuedMessages({ org, tick, onSent }: { org: Org; tick: number; 
           {queued?.map((q, i) => (
             <tr key={i}>
               <td className="mono">{q.loan_number}</td>
-              <td className="ellipsis">{q.company}</td>
+              <td className="ellipsis" title={q.company}>{q.company}</td>
               <td><span className="pill">{q.channel}</span></td>
               <td className="small">{q.recipient}</td>
               <td><span className="status s-amber"><Ico.clock /> {q.days_late}d late · {q.rule_days}d rule</span></td>
@@ -63,7 +63,7 @@ export function OutreachLog({ org, tick }: { org: Org; tick: number }) {
           {attempts.map(a => (
             <tr key={a.id}>
               <td className="small mono">{new Date(a.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td>
-              <td className="ellipsis">{a.customers?.company ?? a.customers?.name ?? '—'}</td>
+              <td className="ellipsis" title={a.customers?.company ?? a.customers?.name ?? undefined}>{a.customers?.company ?? a.customers?.name ?? '—'}</td>
               <td><span className="pill">{a.channel === 'email' ? <Ico.text /> : <Ico.hash />}{a.channel}</span>{a.rule_id && <span className="pill" style={{ marginLeft: 4 }}>auto</span>}</td>
               <td className="small">{a.recipient}</td>
               <td className="ellipsis small" title={a.body}>{a.subject ? <b>{a.subject} — </b> : null}{a.body}</td>
@@ -97,7 +97,11 @@ export function DelinquencyRules({ org, onRan }: { org: Org; onRan: () => void }
     load()
   }
   const toggle = async (r: Rule) => { await supabase.from('outreach_rules').update({ enabled: !r.enabled }).eq('id', r.id); load() }
-  const remove = async (r: Rule) => { await supabase.from('outreach_rules').delete().eq('id', r.id); load() }
+  const remove = async (r: Rule) => {
+    if (!window.confirm(`Delete the ${r.days_past_due}+ days rule? Automated outreach from it will stop.`)) return
+    await supabase.from('outreach_rules').delete().eq('id', r.id)
+    load()
+  }
 
   const runNow = async () => {
     setRunning(true); setResult(null)

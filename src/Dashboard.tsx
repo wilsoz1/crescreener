@@ -121,10 +121,10 @@ export default function Dashboard({ org }: { org: Org }) {
             <div className="tile"><div className="n" style={{ color: pastDue.length ? 'var(--red)' : 'inherit' }}>{pastDue.length}</div><div className="l">Lates{pastDue.length ? ` · ${money(pastDue.reduce((s, x) => s + (x.pd?.amount ?? 0), 0))} past due` : ''}</div></div>
             <div className="tile"><div className="n" style={{ color: covFails.length ? 'var(--red)' : 'inherit' }}>{covFails.length}<span style={{ fontSize: 14, color: 'var(--amber)' }}> +{covNear.length} near</span></div><div className="l">Covenant failures</div></div>
             <div className="tile"><div className="n" style={{ color: tickPastDue.length ? 'var(--amber)' : 'inherit' }}>{tickPastDue.length}</div><div className="l">Reporting past due</div></div>
-            <div className="tile rowlink" onClick={() => setTab('Operations')} style={{ cursor: 'pointer' }}>
+            <button type="button" className="tile rowlink" onClick={() => setTab('Operations')}>
               <div className="n" style={{ color: queuedCount ? 'var(--amber)' : 'inherit' }}>{queuedCount ?? '…'}</div>
               <div className="l">Queued messages → Operations</div>
-            </div>
+            </button>
           </div>
 
           <div className="grid" style={{ marginBottom: 20 }}>
@@ -172,8 +172,8 @@ export default function Dashboard({ org }: { org: Org }) {
               <tbody>
                 {loans.map(l => (
                   <tr key={l.id} className="rowlink" onClick={() => (window.location.hash = `#/app/loans/${l.id}`)}>
-                    <td className="mono">{l.loan_number}</td>
-                    <td className="ellipsis">{l.customers?.company ?? '—'}</td>
+                    <td className="mono"><a className="cell-link" href={`#/app/loans/${l.id}`}>{l.loan_number}</a></td>
+                    <td className="ellipsis" title={l.customers?.company ?? undefined}>{l.customers?.company ?? '—'}</td>
                     <td>{l.type}</td>
                     <td><span className={`status ${stageCls[l.stage] ?? 's-gray'}`}>{l.stage === 'Servicing' ? 'Active' : l.stage}</span></td>
                     <td className="num mono">{money(l.amount)}</td>
@@ -193,7 +193,7 @@ export default function Dashboard({ org }: { org: Org }) {
                   {deposits.map(d => (
                     <tr key={d.id}>
                       <td>{d.account_name}</td>
-                      <td className="ellipsis">{d.customers?.company ?? '—'}</td>
+                      <td className="ellipsis" title={d.customers?.company ?? undefined}>{d.customers?.company ?? '—'}</td>
                       <td><span className="pill">{d.type.replace('_', ' ')}</span></td>
                       <td className="num mono">{money(d.balance)}</td>
                     </tr>

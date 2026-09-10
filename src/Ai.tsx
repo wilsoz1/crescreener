@@ -40,6 +40,7 @@ export function AskBar() {
         <Ico.search />
         <input
           value={q} onChange={e => setQ(e.target.value)} required
+          aria-label="Ask your portfolio"
           placeholder='Ask your portfolio — e.g. "which loans are interest-only?" or "covenants failing right now"'
         />
         <button className="btn-dark" disabled={busy}>{busy ? 'Thinking…' : 'Ask'}</button>
@@ -54,7 +55,7 @@ export function AskBar() {
                 <thead><tr>{Object.keys(result.rows[0]).map(k => <th key={k}>{k.replace(/_/g, ' ')}</th>)}</tr></thead>
                 <tbody>
                   {result.rows.slice(0, 10).map((r, i) => (
-                    <tr key={i}>{Object.values(r).map((v, j) => <td key={j} className="small">{v == null ? '—' : String(v)}</td>)}</tr>
+                    <tr key={i}>{Object.values(r).map((v, j) => <td key={j} className="small">{v == null ? '—' : v === 'Servicing' ? 'Active' : String(v)}</td>)}</tr>
                   ))}
                 </tbody>
               </table>

@@ -118,7 +118,7 @@ export default function LoanPage({ org, loanId }: { org: Org; loanId: string }) 
           </div>
         </div>
         <span className="spacer" />
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           <DraftButton
             kind="annual_review" loanId={loanId} label="Draft annual review"
             onSave={async md => {
@@ -279,7 +279,11 @@ function SpreadsTab({ loan, spreads, onChange }: { loan: DbLoan; spreads: Spread
     setEditing(null)
     onChange()
   }
-  const remove = async (s: Spread) => { await supabase.from('financial_spreads').delete().eq('id', s.id); onChange() }
+  const remove = async (s: Spread) => {
+    if (!window.confirm(`Delete the ${s.period} spread? This cannot be undone.`)) return
+    await supabase.from('financial_spreads').delete().eq('id', s.id)
+    onChange()
+  }
 
   const annualDS = loan.next_payment_amount ? loan.next_payment_amount * 12 : null
   const num = (s: Spread, k: string) => (editing === s.id ? (draft[k] === '' ? null : +draft[k]) : s.data[k] ?? null)
@@ -320,7 +324,7 @@ function SpreadsTab({ loan, spreads, onChange }: { loan: DbLoan; spreads: Spread
               {spreads.map(s => (
                 <td key={s.id} className="num mono">
                   {editing === s.id
-                    ? <input className="cell-input" type="number" value={draft[k]} onChange={e => setDraft({ ...draft, [k]: e.target.value })} />
+                    ? <input className="cell-input" type="number" aria-label={`${label} — ${s.period}`} value={draft[k]} onChange={e => setDraft({ ...draft, [k]: e.target.value })} />
                     : fmt(s.data[k] ?? null)}
                 </td>
               ))}
@@ -450,7 +454,11 @@ function StructureTab({ loan, guarantors }: { loan: DbLoan; guarantors: Guaranto
 const DocumentsTab = ({ org, loan, docs, links, onChange }: { org: Org; loan: DbLoan; docs: Doc[]; links: ShareLink[]; onChange: () => void }) => {
   const [busy, setBusy] = useState<string | null>(null)
   const [drag, setDrag] = useState(false)
-  const revoke = async (id: string) => { await supabase.from('share_links').update({ revoked: true }).eq('id', id); onChange() }
+  const revoke = async (s: ShareLink) => {
+    if (!window.confirm(`Revoke the link shared with ${s.institution}? They will lose access immediately.`)) return
+    await supabase.from('share_links').update({ revoked: true }).eq('id', s.id)
+    onChange()
+  }
 
   const upload = async (files: FileList | File[]) => {
     for (const file of Array.from(files)) {
@@ -515,7 +523,7 @@ const DocumentsTab = ({ org, loan, docs, links, onChange }: { org: Org; loan: Db
                   <td className="small">{new Date(s.expires_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
                   <td className="num mono">{s.access_count}</td>
                   <td><span className={`status ${s.revoked ? 's-red' : expired ? 's-gray' : 's-green'}`}>{s.revoked ? 'Revoked' : expired ? 'Expired' : 'Active'}</span></td>
-                  <td>{!s.revoked && !expired && <button className="btn-light" onClick={() => revoke(s.id)}>Revoke</button>}</td>
+                  <td>{!s.revoked && !expired && <button className="btn-light" onClick={() => revoke(s)}>Revoke</button>}</td>
                 </tr>
               )
             })}
@@ -556,8 +564,8 @@ function Compose({ org, loan, onSent }: { org: Org; loan: DbLoan; onSent: () => 
         <button type="button" className={channel === 'sms' ? 'on' : ''} onClick={() => setChannel('sms')}>Text</button>
       </div>
       <span className="small mono">to {recipient ?? `no ${channel} on file`}</span>
-      {channel === 'email' && <input placeholder="Subject" value={subject} onChange={e => setSubject(e.target.value)} />}
-      <input required placeholder={channel === 'sms' ? 'Text message…' : 'Message…'} value={body} onChange={e => setBody(e.target.value)} style={{ flex: 2 }} />
+      {channel === 'email' && <input aria-label="Subject" placeholder="Subject" value={subject} onChange={e => setSubject(e.target.value)} />}
+      <input required aria-label="Message" placeholder={channel === 'sms' ? 'Text message…' : 'Message…'} value={body} onChange={e => setBody(e.target.value)} style={{ flex: 2 }} />
       <button className="btn-dark" disabled={busy}>{busy ? 'Sending…' : 'Send'}</button>
       {err && <span className="small" style={{ color: 'var(--red)', flexBasis: '100%' }}>{err}</span>}
     </form>
