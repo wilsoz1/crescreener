@@ -1,10 +1,51 @@
 // Org-level outreach machinery, embedded in the Dashboard's Operations tab.
 // Per-loan compose lives on the loan page (Activity tab).
 import { useEffect, useState } from 'react'
-import { supabase, Attempt, Org, Rule } from './supabase'
+import { supabase, Attempt, Org, Rule, Queued, runRules } from './supabase'
 import { Ico } from './Icons'
 
 const statusCls: Record<string, string> = { sent: 's-green', simulated: 's-blue', failed: 's-red' }
+
+// What the rules engine WOULD send right now (dry run) — with a one-click release.
+export function QueuedMessages({ org, tick, onSent }: { org: Org; tick: number; onSent: () => void }) {
+  const [queued, setQueued] = useState<Queued[] | null>(null)
+  const [sending, setSending] = useState(false)
+
+  useEffect(() => { runRules(true).then(d => setQueued(d.queued ?? [])) }, [org.id, tick])
+
+  const sendAll = async () => {
+    setSending(true)
+    await runRules(false)
+    setSending(false)
+    onSent()
+  }
+
+  return (
+    <div className="grid" style={{ marginBottom: 20 }}>
+      <div className="uw-head">
+        <span><b>Queued messages</b> <span className="small">what the next rules run will send — released daily, or now</span></span>
+        {queued && queued.length > 0 && <button className="btn-dark" onClick={sendAll} disabled={sending}>{sending ? 'Sending…' : `Send ${queued.length} now`}</button>}
+      </div>
+      <table>
+        <thead><tr><th>Loan</th><th>Borrower</th><th>Channel</th><th>To</th><th>Trigger</th><th>Message</th></tr></thead>
+        <tbody>
+          {queued === null && <tr><td colSpan={6} className="small">Checking the queue…</td></tr>}
+          {queued?.map((q, i) => (
+            <tr key={i}>
+              <td className="mono">{q.loan_number}</td>
+              <td className="ellipsis">{q.company}</td>
+              <td><span className="pill">{q.channel}</span></td>
+              <td className="small">{q.recipient}</td>
+              <td><span className="status s-amber"><Ico.clock /> {q.days_late}d late · {q.rule_days}d rule</span></td>
+              <td className="ellipsis small" title={q.body}>{q.subject ? <b>{q.subject} — </b> : null}{q.body}</td>
+            </tr>
+          ))}
+          {queued?.length === 0 && <tr><td colSpan={6} className="small">Queue is clear — nothing is waiting to send.</td></tr>}
+        </tbody>
+      </table>
+    </div>
+  )
+}
 
 export function OutreachLog({ org, tick }: { org: Org; tick: number }) {
   const [attempts, setAttempts] = useState<Attempt[]>([])

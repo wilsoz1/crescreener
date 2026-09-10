@@ -36,8 +36,22 @@ async function deliver(channel: "email" | "sms", recipient: string, subject: str
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: cors });
+  // dry_run=1 → report what WOULD send (the queue) without sending or logging anything.
+  const dryRun = new URL(req.url).searchParams.get("dry_run") === "1";
   const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
   const today = new Date().toISOString().slice(0, 10);
+
+  // Resolve the caller (when a user JWT is supplied) so detailed output can be org-scoped.
+  let userOrgIds: string[] | null = null;
+  const authHeader = req.headers.get("Authorization") ?? "";
+  if (authHeader.startsWith("Bearer ")) {
+    const { data: u } = await admin.auth.getUser(authHeader.slice(7));
+    if (u?.user) {
+      const { data: m } = await admin.from("org_members").select("org_id").eq("user_id", u.user.id);
+      userOrgIds = (m ?? []).map(r => r.org_id);
+    }
+  }
+  if (dryRun && !userOrgIds) return json({ error: "sign in required" }, 401);
 
   const { data: overdue } = await admin
     .from("loan_payments")
@@ -48,12 +62,14 @@ Deno.serve(async (req) => {
 
   let sent = 0, skipped = 0;
   const actions: string[] = [];
+  const queued: { loan_number: string; company: string; channel: string; recipient: string; days_late: number; rule_days: number; subject: string | null; body: string }[] = [];
 
   for (const p of overdue ?? []) {
+    if (dryRun && !userOrgIds!.includes(p.org_id)) continue;
     const late = daysLate(p.due_date);
     // Escalate stored status as it ages (due → late → missed at 10+ days).
     const shouldBe = late >= 10 ? "missed" : "late";
-    if (p.status !== shouldBe) await admin.from("loan_payments").update({ status: shouldBe }).eq("id", p.id);
+    if (!dryRun && p.status !== shouldBe) await admin.from("loan_payments").update({ status: shouldBe }).eq("id", p.id);
 
     const cust = (p.loans as { customers?: { name?: string; company?: string; email?: string; phone?: string } } | null)?.customers;
     const loanNumber = (p.loans as { loan_number?: string } | null)?.loan_number ?? "";
@@ -76,6 +92,10 @@ Deno.serve(async (req) => {
           .replaceAll("{{lender}}", lender);
         const subject = ch === "email" && r.subject ? fill(r.subject) : null;
         const body = fill(r.body);
+        if (dryRun) {
+          queued.push({ loan_number: loanNumber, company: cust?.company ?? "", channel: ch, recipient, days_late: late, rule_days: r.days_past_due, subject, body });
+          continue;
+        }
         const res = await deliver(ch, recipient, subject, body);
         await admin.from("outreach_attempts").insert({
           org_id: p.org_id, customer_id: (p.loans as { customer_id?: string } | null)?.customer_id ?? null,
@@ -88,5 +108,7 @@ Deno.serve(async (req) => {
       }
     }
   }
-  return json({ overdue: overdue?.length ?? 0, sent, skipped_already_sent: skipped, actions });
+  if (dryRun) return json({ queued });
+  // Detailed action lines only for authenticated org members; cron/public callers get counts.
+  return json({ overdue: overdue?.length ?? 0, sent, skipped_already_sent: skipped, actions: userOrgIds ? actions : [] });
 });

@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
-import { supabase, DbLoan, Doc, Org, ShareLink, Attempt, Payment, DbCovenant, DbTickler, Guarantor, Note, money, daysLate } from './supabase'
+import { supabase, DbLoan, Doc, Org, ShareLink, Attempt, Payment, DbCovenant, DbTickler, Guarantor, Note, Spread, SPREAD_LINES, money, daysLate, spreadFromDocument } from './supabase'
 import { fmtDate } from './Loans'
 import { classifyType } from './Documents'
 import { Ico } from './Icons'
 
 const shareUrl = (token: string) => `${window.location.origin}/#/share/${token}`
 const covCls = { Pass: 's-green', Near: 's-amber', Fail: 's-red' } as const
-const TABS = ['Overview', 'Payments', 'Compliance', 'Structure', 'Documents', 'Activity'] as const
+const TABS = ['Overview', 'Payments', 'Spreads', 'Compliance', 'Structure', 'Documents', 'Activity'] as const
 type Tab = (typeof TABS)[number]
 
 const payStatus = (p: Payment) => {
@@ -35,12 +35,17 @@ export default function LoanPage({ org, loanId }: { org: Org; loanId: string }) 
   const [ticklers, setTicklers] = useState<DbTickler[]>([])
   const [guarantors, setGuarantors] = useState<Guarantor[]>([])
   const [notes, setNotes] = useState<Note[]>([])
+  const [spreads, setSpreads] = useState<Spread[]>([])
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<Tab>('Overview')
 
   const load = async () => {
     const { data: l } = await supabase.from('loans').select('*, customers(name, company, email, phone)').eq('id', loanId).single()
     setLoan((l as DbLoan) ?? null)
+    if (l?.customer_id) {
+      supabase.from('financial_spreads').select('*').eq('customer_id', l.customer_id).order('period')
+        .then(({ data }) => setSpreads((data as Spread[]) ?? []))
+    }
     const [d, s, pay, cov, tick, g, n, o] = await Promise.all([
       supabase.from('documents').select('*, loans(loan_number), customers(company)').eq('loan_id', loanId).order('created_at', { ascending: false }),
       supabase.from('share_links').select('*').eq('loan_id', loanId).order('created_at', { ascending: false }),
@@ -73,8 +78,10 @@ export default function LoanPage({ org, loanId }: { org: Org; loanId: string }) 
   const docsReview = docs.filter(d => d.status === 'needs_review')
   const healthy = !overdue.length && !covFails.length && !tickPastDue.length
 
+  const draftSpreads = spreads.filter(s => s.status === 'draft')
   const badges: Partial<Record<Tab, { n: number; cls: string }>> = {
     Payments: overdue.length ? { n: overdue.length, cls: 'red' } : undefined,
+    Spreads: draftSpreads.length ? { n: draftSpreads.length, cls: 'amber' } : undefined,
     Compliance: covFails.length + tickPastDue.length ? { n: covFails.length + tickPastDue.length, cls: covFails.length ? 'red' : 'amber' } : undefined,
     Documents: docsReview.length ? { n: docsReview.length, cls: 'amber' } : undefined,
   }
@@ -122,6 +129,7 @@ export default function LoanPage({ org, loanId }: { org: Org; loanId: string }) 
 
       {tab === 'Overview' && <Overview {...{ overdue, covFails, covNear, tickPastDue, stalePfs, docsReview, notes, outreach, payments, setTab }} />}
       {tab === 'Payments' && <PaymentsTab loan={loan} payments={payments} />}
+      {tab === 'Spreads' && <SpreadsTab loan={loan} spreads={spreads} onChange={load} />}
       {tab === 'Compliance' && <ComplianceTab covenants={covenants} ticklers={ticklers} />}
       {tab === 'Structure' && <StructureTab loan={loan} guarantors={guarantors} />}
       {tab === 'Documents' && <DocumentsTab org={org} loan={loan} docs={docs} links={links} onChange={load} />}
@@ -218,6 +226,99 @@ function PaymentsTab({ loan, payments }: { loan: DbLoan; payments: Payment[] }) 
         </table>
       </Card>
     </div>
+  )
+}
+
+// ——— Spreads: borrower financials, one column per period, populated from uploaded statements ———
+function SpreadsTab({ loan, spreads, onChange }: { loan: DbLoan; spreads: Spread[]; onChange: () => void }) {
+  const [editing, setEditing] = useState<string | null>(null)
+  const [draft, setDraft] = useState<Record<string, string>>({})
+
+  const startEdit = (s: Spread) => {
+    setEditing(s.id)
+    setDraft(Object.fromEntries(SPREAD_LINES.map(([k]) => [k, s.data[k] == null ? '' : String(s.data[k])])))
+  }
+  const save = async (s: Spread, markReviewed: boolean) => {
+    const data = Object.fromEntries(SPREAD_LINES.map(([k]) => [k, draft[k] === '' ? null : +draft[k]]))
+    await supabase.from('financial_spreads').update({ data, ...(markReviewed ? { status: 'reviewed' } : {}) }).eq('id', s.id)
+    setEditing(null)
+    onChange()
+  }
+  const remove = async (s: Spread) => { await supabase.from('financial_spreads').delete().eq('id', s.id); onChange() }
+
+  const annualDS = loan.next_payment_amount ? loan.next_payment_amount * 12 : null
+  const num = (s: Spread, k: string) => (editing === s.id ? (draft[k] === '' ? null : +draft[k]) : s.data[k] ?? null)
+  const ratio = (label: string, fn: (s: Spread) => string) => (
+    <tr key={label} className="ratio-row"><td>{label}</td>{spreads.map(s => <td key={s.id} className="num mono">{fn(s)}</td>)}<td /></tr>
+  )
+  const fmt = (v: number | null) => (v == null ? '—' : `$${Math.round(v).toLocaleString()}`)
+
+  if (!spreads.length) return (
+    <Card title="Financial spreads">
+      <p className="small" style={{ padding: 14 }}>
+        No spreads yet for this borrower. Upload a <b>tax return</b> or <b>financial statement</b> on the Documents tab — a draft spread
+        column is created automatically for each statement, ready for analyst input.
+      </p>
+    </Card>
+  )
+
+  return (
+    <Card title="Financial spreads" sub="one column per statement — drafts are created automatically when tax returns or financials are uploaded">
+      <table>
+        <thead>
+          <tr>
+            <th style={{ width: 200 }}>Line item</th>
+            {spreads.map(s => (
+              <th key={s.id} className="num">
+                <div>{s.period}</div>
+                <div className="small" style={{ fontWeight: 400 }}>{s.statement_type}</div>
+                <span className={`status ${s.status === 'reviewed' ? 's-green' : 's-amber'}`} style={{ marginTop: 4 }}>{s.status === 'reviewed' ? 'Reviewed' : 'Draft'}</span>
+              </th>
+            ))}
+            <th style={{ width: 170 }} />
+          </tr>
+        </thead>
+        <tbody>
+          {SPREAD_LINES.map(([k, label]) => (
+            <tr key={k}>
+              <td className={k === 'ebitda' || k === 'net_income' ? 'bold' : ''}>{label}</td>
+              {spreads.map(s => (
+                <td key={s.id} className="num mono">
+                  {editing === s.id
+                    ? <input className="cell-input" type="number" value={draft[k]} onChange={e => setDraft({ ...draft, [k]: e.target.value })} />
+                    : fmt(s.data[k] ?? null)}
+                </td>
+              ))}
+              <td />
+            </tr>
+          ))}
+          {ratio('EBITDA margin', s => { const e = num(s, 'ebitda'), r = num(s, 'revenue'); return e != null && r ? `${((e / r) * 100).toFixed(1)}%` : '—' })}
+          {ratio('Debt / EBITDA', s => { const e = num(s, 'ebitda'), d = num(s, 'total_debt'); return e && d != null ? `${(d / e).toFixed(1)}x` : '—' })}
+          {ratio('Debt / TNW', s => { const t = num(s, 'tangible_net_worth'), d = num(s, 'total_debt'); return t && d != null ? `${(d / t).toFixed(1)}x` : '—' })}
+          {ratio(`DSCR (this loan${annualDS ? `, ${money(annualDS)}/yr DS` : ''})`, s => { const e = num(s, 'ebitda'); return e != null && annualDS ? `${(e / annualDS).toFixed(2)}x` : '—' })}
+          <tr>
+            <td />
+            {spreads.map(s => (
+              <td key={s.id} className="num">
+                {editing === s.id ? (
+                  <span style={{ display: 'inline-flex', gap: 6 }}>
+                    <button className="btn-light" onClick={() => setEditing(null)}>Cancel</button>
+                    <button className="btn-light" onClick={() => save(s, false)}>Save</button>
+                    <button className="btn-dark" onClick={() => save(s, true)}>Save & review</button>
+                  </span>
+                ) : (
+                  <span style={{ display: 'inline-flex', gap: 6 }}>
+                    <button className="btn-light" onClick={() => startEdit(s)}>Edit</button>
+                    <button className="btn-light" onClick={() => remove(s)}>Delete</button>
+                  </span>
+                )}
+              </td>
+            ))}
+            <td />
+          </tr>
+        </tbody>
+      </table>
+    </Card>
   )
 }
 
@@ -318,10 +419,12 @@ const DocumentsTab = ({ org, loan, docs, links, onChange }: { org: Org; loan: Db
       const path = `${org.id}/${crypto.randomUUID()}-${file.name}`
       const { error } = await supabase.storage.from('documents').upload(path, file)
       if (!error) {
-        await supabase.from('documents').insert({
+        const { data: row } = await supabase.from('documents').insert({
           org_id: org.id, loan_id: loan.id, customer_id: loan.customer_id,
           filename: file.name, storage_path: path, doc_type: docType, confidence, status: 'routed',
-        })
+        }).select().single()
+        // Financial statements & tax returns spawn a draft spread column for the analyst.
+        if (row && loan.customer_id) await spreadFromDocument(org.id, loan.customer_id, row.id, file.name, docType)
       }
     }
     setBusy(null)

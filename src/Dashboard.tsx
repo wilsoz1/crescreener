@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { supabase, DbLoan, Deposit, CreditLine, Org, Payment, Attempt, money, pastDueOf, daysLate } from './supabase'
-import { OutreachLog, DelinquencyRules } from './Outreach'
+import { supabase, DbLoan, Deposit, CreditLine, Org, Payment, Attempt, money, pastDueOf, daysLate, runRules } from './supabase'
+import { OutreachLog, DelinquencyRules, QueuedMessages } from './Outreach'
 import DocRouting from './Documents'
 import { Ico } from './Icons'
 
@@ -26,8 +26,10 @@ export default function Dashboard({ org }: { org: Org }) {
   const [covs, setCovs] = useState<CovRow[]>([])
   const [ticks, setTicks] = useState<TickRow[]>([])
   const [docsReview, setDocsReview] = useState<DocRow[]>([])
-  const [recent, setRecent] = useState<{ at: string; chip: string; text: string }[]>([])
+  const [queuedCount, setQueuedCount] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
+
+  useEffect(() => { runRules(true).then(d => setQueuedCount((d.queued ?? []).length)).catch(() => setQueuedCount(0)) }, [org.id, tick])
 
   useEffect(() => {
     Promise.all([
@@ -38,9 +40,7 @@ export default function Dashboard({ org }: { org: Org }) {
       supabase.from('covenants').select('id, name, actual, requirement, status, loan_id, loans(loan_number)'),
       supabase.from('ticklers').select('id, requirement, due_date, status, responsible, loan_id, loans(loan_number)'),
       supabase.from('documents').select('id, filename, status').eq('status', 'needs_review'),
-      supabase.from('outreach_attempts').select('*, customers(name, company)').order('created_at', { ascending: false }).limit(6),
-      supabase.from('loan_notes').select('id, body, author, created_at, loans(loan_number)').order('created_at', { ascending: false }).limit(4),
-    ]).then(([l, d, c, p, cov, tk, dr, oa, nt]) => {
+    ]).then(([l, d, c, p, cov, tk, dr]) => {
       setLoans((l.data as DbLoan[]) ?? [])
       setDeposits((d.data as Deposit[]) ?? [])
       setLocs((c.data as CreditLine[]) ?? [])
@@ -48,12 +48,6 @@ export default function Dashboard({ org }: { org: Org }) {
       setCovs((cov.data as unknown as CovRow[]) ?? [])
       setTicks((tk.data as unknown as TickRow[]) ?? [])
       setDocsReview((dr.data as DocRow[]) ?? [])
-      const attempts = (oa.data as Attempt[]) ?? []
-      const notes = (nt.data as unknown as NoteRow[]) ?? []
-      setRecent([
-        ...attempts.map(a => ({ at: a.created_at, chip: a.rule_id ? 'auto' : a.channel, text: `${a.channel} to ${a.customers?.company ?? a.recipient} — ${a.subject ?? a.body}` })),
-        ...notes.map(n => ({ at: n.created_at, chip: 'note', text: `${n.author} on ${n.loans?.loan_number}: ${n.body}` })),
-      ].sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 6))
       setLoading(false)
     })
   }, [org.id, tick])
@@ -61,6 +55,7 @@ export default function Dashboard({ org }: { org: Org }) {
   if (loading) return <p className="subtitle">Loading portfolio…</p>
 
   const loanTotal = loans.reduce((s, l) => s + l.amount, 0)
+  const balanceTotal = loans.reduce((s, l) => s + Number(l.current_balance ?? 0), 0)
   const depTotal = deposits.reduce((s, d) => s + d.balance, 0)
   const commitTotal = locs.reduce((s, c) => s + c.commitment, 0)
   const outTotal = locs.reduce((s, c) => s + c.outstanding, 0)
@@ -83,13 +78,7 @@ export default function Dashboard({ org }: { org: Org }) {
       <div className="viewbar" style={{ marginBottom: 4, alignItems: 'flex-start' }}>
         <div>
           <h1 style={{ marginBottom: 2 }}>{org.name}</h1>
-          <p className="subtitle" style={{ marginBottom: 10 }}>Invite code <b>{org.invite_code}</b> · all data scoped to your bank by row-level security</p>
-          <div className="stat-row">
-            <span><b>{money(loanTotal)}</b><i>loan exposure · {loans.length} loans</i></span>
-            <span><b>{money(depTotal)}</b><i>deposits · {deposits.length} accounts</i></span>
-            <span><b>{money(commitTotal)}</b><i>LOC commitments · {locs.length} lines</i></span>
-            <span><b>{(util * 100).toFixed(0)}%</b><i>line utilization · {money(outTotal)} drawn</i></span>
-          </div>
+          <p className="subtitle" style={{ marginBottom: 0 }}>Invite code <b>{org.invite_code}</b> · all data scoped to your bank by row-level security</p>
         </div>
         <span className="spacer" />
         <a className="btn-dark" href="#/app/screener" style={{ textDecoration: 'none' }}>Screen a new deal <Ico.chevron /></a>
@@ -115,7 +104,24 @@ export default function Dashboard({ org }: { org: Org }) {
       </div>
 
       {tab === 'Overview' && (
-        <div className="two-col">
+        <>
+          <div className="tiles" style={{ marginTop: 4 }}>
+            <div className="tile"><div className="n">{loans.length}</div><div className="l">Total loans · {money(loanTotal)} committed</div></div>
+            <div className="tile"><div className="n">{money(balanceTotal)}</div><div className="l">Outstanding loan balances</div></div>
+            <div className="tile"><div className="n">{money(depTotal)}</div><div className="l">Deposits · {deposits.length} accounts</div></div>
+            <div className="tile">
+              <div className="n">{(util * 100).toFixed(0)}%</div><div className="l">LOC utilization · {money(outTotal)} of {money(commitTotal)}</div>
+              <div className="bar"><span style={{ width: `${Math.min(util * 100, 100)}%` }} /></div>
+            </div>
+            <div className="tile"><div className="n" style={{ color: pastDue.length ? 'var(--red)' : 'inherit' }}>{pastDue.length}</div><div className="l">Lates{pastDue.length ? ` · ${money(pastDue.reduce((s, x) => s + (x.pd?.amount ?? 0), 0))} past due` : ''}</div></div>
+            <div className="tile"><div className="n" style={{ color: covFails.length ? 'var(--red)' : 'inherit' }}>{covFails.length}<span style={{ fontSize: 14, color: 'var(--amber)' }}> +{covNear.length} near</span></div><div className="l">Covenant failures</div></div>
+            <div className="tile"><div className="n" style={{ color: tickPastDue.length ? 'var(--amber)' : 'inherit' }}>{tickPastDue.length}</div><div className="l">Reporting past due</div></div>
+            <div className="tile rowlink" onClick={() => setTab('Operations')} style={{ cursor: 'pointer' }}>
+              <div className="n" style={{ color: queuedCount ? 'var(--amber)' : 'inherit' }}>{queuedCount ?? '…'}</div>
+              <div className="l">Queued messages → Operations</div>
+            </div>
+          </div>
+
           <div className="grid" style={{ marginBottom: 20 }}>
             <div className="uw-head"><span><b>Needs attention</b> {attention > 0 && <span className="small">{attention} item{attention > 1 ? 's' : ''} across the book</span>}</span></div>
             {attention ? <>
@@ -149,18 +155,7 @@ export default function Dashboard({ org }: { org: Org }) {
               ))}
             </> : <p className="small" style={{ padding: 14 }}>Nothing needs attention. Payments current, covenants in compliance, reporting up to date.</p>}
           </div>
-
-          <div className="grid" style={{ marginBottom: 20 }}>
-            <div className="uw-head"><span><b>Recent activity</b> <span className="small">outreach & notes across the book</span></span></div>
-            {recent.length ? recent.map((e, i) => (
-              <div className="alert" key={i}>
-                <span className="pill">{e.chip}</span>
-                <span style={{ flex: 1 }} className="small ellipsis" title={e.text}>{e.text}</span>
-                <span className="small mono">{new Date(e.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
-              </div>
-            )) : <p className="small" style={{ padding: 14 }}>No activity yet.</p>}
-          </div>
-        </div>
+        </>
       )}
 
       {tab === 'Portfolio' && (
@@ -230,6 +225,7 @@ export default function Dashboard({ org }: { org: Org }) {
 
       {tab === 'Operations' && (
         <>
+          <QueuedMessages org={org} tick={tick} onSent={() => setTick(t => t + 1)} />
           <DelinquencyRules org={org} onRan={() => setTick(t => t + 1)} />
           <div className="grid" style={{ marginBottom: 20 }}>
             <div className="uw-head"><span><b>Document routing</b> <span className="small">drop anything — classification files it on the right loan; ambiguous files queue here</span></span></div>

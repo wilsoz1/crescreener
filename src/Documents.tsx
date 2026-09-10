@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { supabase, Doc, Org } from './supabase'
+import { supabase, Doc, Org, spreadFromDocument } from './supabase'
 import { Ico } from './Icons'
 
 type LoanLite = { id: string; loan_number: string; customer_id: string | null; customers: { company: string | null } | null }
@@ -59,12 +59,13 @@ export default function Documents({ org }: { org: Org }) {
       const path = `${org.id}/${crypto.randomUUID()}-${file.name}`
       const { error: upErr } = await supabase.storage.from('documents').upload(path, file)
       if (upErr) { setErr(`${file.name}: ${upErr.message}`); break }
-      const { error: insErr } = await supabase.from('documents').insert({
+      const { data: row, error: insErr } = await supabase.from('documents').insert({
         org_id: org.id, loan_id: loan?.id ?? null, customer_id: loan?.customer_id ?? null,
         filename: file.name, storage_path: path, doc_type: docType, confidence,
         status: loan && docType !== 'Unclassified' ? 'routed' : 'needs_review',
-      })
+      }).select().single()
       if (insErr) { setErr(`${file.name}: ${insErr.message}`); break }
+      if (row && loan?.customer_id) await spreadFromDocument(org.id, loan.customer_id, row.id, file.name, docType)
     }
     setBusy(null)
     load()

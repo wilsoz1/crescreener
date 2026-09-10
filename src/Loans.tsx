@@ -12,18 +12,21 @@ const payCls: Record<PaymentType, string> = {
 export const fmtDate = (d: string | null) =>
   d ? new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'
 
+type Review = 'Covenant' | 'Annual review'
 type Filters = {
   amountMin: string; amountMax: string
   maturityFrom: string; maturityTo: string
   drawEndBy: string
   pay: Set<PaymentType>
   pastDueOnly: boolean
+  reviews: Set<Review>
 }
-const EMPTY: Filters = { amountMin: '', amountMax: '', maturityFrom: '', maturityTo: '', drawEndBy: '', pay: new Set(), pastDueOnly: false }
+const EMPTY: Filters = { amountMin: '', amountMax: '', maturityFrom: '', maturityTo: '', drawEndBy: '', pay: new Set(), pastDueOnly: false, reviews: new Set() }
 
 export default function Loans({ org }: { org: Org }) {
   const [loans, setLoans] = useState<DbLoan[]>([])
   const [payments, setPayments] = useState<Payment[]>([])
+  const [reviewMap, setReviewMap] = useState<Record<string, Review[]>>({})
   const [loading, setLoading] = useState(true)
   const [f, setF] = useState<Filters>(EMPTY)
 
@@ -31,9 +34,21 @@ export default function Loans({ org }: { org: Org }) {
     Promise.all([
       supabase.from('loans').select('*, customers(name, company, email, phone)').order('amount', { ascending: false }),
       supabase.from('loan_payments').select('id, loan_id, due_date, amount, status, paid_date'),
-    ]).then(([l, p]) => {
+      supabase.from('covenants').select('loan_id'),
+      supabase.from('ticklers').select('loan_id, requirement'),
+    ]).then(([l, p, cov, tick]) => {
       setLoans((l.data as DbLoan[]) ?? [])
       setPayments((p.data as Payment[]) ?? [])
+      // A loan is under covenant review if it has covenants; under annual review if a tickler says so.
+      const map: Record<string, Review[]> = {}
+      for (const c of (cov.data as { loan_id: string }[]) ?? []) {
+        if (!map[c.loan_id]?.includes('Covenant')) map[c.loan_id] = [...(map[c.loan_id] ?? []), 'Covenant']
+      }
+      for (const t of (tick.data as { loan_id: string; requirement: string }[]) ?? []) {
+        if (/annual review/i.test(t.requirement) && !map[t.loan_id]?.includes('Annual review'))
+          map[t.loan_id] = [...(map[t.loan_id] ?? []), 'Annual review']
+      }
+      setReviewMap(map)
       setLoading(false)
     })
   }, [org.id])
@@ -46,15 +61,21 @@ export default function Loans({ org }: { org: Org }) {
     if (f.drawEndBy && (!l.draw_period_end || l.draw_period_end > f.drawEndBy)) return false
     if (f.pay.size && !f.pay.has(l.payment_type)) return false
     if (f.pastDueOnly && !pastDueOf(payments, l.id)) return false
+    if (f.reviews.size && ![...f.reviews].every(r => reviewMap[l.id]?.includes(r))) return false
     return true
-  }), [loans, payments, f])
+  }), [loans, payments, reviewMap, f])
 
   const togglePay = (p: PaymentType) => {
     const pay = new Set(f.pay)
     pay.has(p) ? pay.delete(p) : pay.add(p)
     setF({ ...f, pay })
   }
-  const active = f.amountMin || f.amountMax || f.maturityFrom || f.maturityTo || f.drawEndBy || f.pay.size > 0 || f.pastDueOnly
+  const toggleReview = (r: Review) => {
+    const reviews = new Set(f.reviews)
+    reviews.has(r) ? reviews.delete(r) : reviews.add(r)
+    setF({ ...f, reviews })
+  }
+  const active = f.amountMin || f.amountMax || f.maturityFrom || f.maturityTo || f.drawEndBy || f.pay.size > 0 || f.pastDueOnly || f.reviews.size > 0
 
   if (loading) return <p className="subtitle">Loading loans…</p>
 
@@ -86,16 +107,22 @@ export default function Loans({ org }: { org: Org }) {
             <button key={p} className={`f-chip ${f.pay.has(p) ? 'on' : ''}`} onClick={() => togglePay(p)}>{p}</button>
           ))}
         </div>
+        <div className="f-group">
+          <span className="f-label"><Ico.shield /> Reviews</span>
+          {(['Covenant', 'Annual review'] as Review[]).map(r => (
+            <button key={r} className={`f-chip ${f.reviews.has(r) ? 'on' : ''}`} onClick={() => toggleReview(r)}>{r}</button>
+          ))}
+        </div>
         <button className={`f-chip red ${f.pastDueOnly ? 'on' : ''}`} onClick={() => setF({ ...f, pastDueOnly: !f.pastDueOnly })}>
           Past due ({loans.filter(l => pastDueOf(payments, l.id)).length})
         </button>
-        {active && <button className="btn-light" onClick={() => setF({ ...EMPTY, pay: new Set() })}>Clear filters</button>}
+        {active && <button className="btn-light" onClick={() => setF({ ...EMPTY, pay: new Set(), reviews: new Set() })}>Clear filters</button>}
       </div>
 
       <div className="grid">
         <table>
           <thead><tr>
-            <th>Loan</th><th>Borrower</th><th>Type</th><th>Stage</th><th>Payment</th><th>Past due</th>
+            <th>Loan</th><th>Borrower</th><th>Type</th><th>Stage</th><th>Payment</th><th>Reviews</th><th>Past due</th>
             <th className="num">Amount</th><th>Rate</th><th>Maturity</th><th>Draw period end</th><th>RM</th>
           </tr></thead>
           <tbody>
@@ -108,6 +135,9 @@ export default function Loans({ org }: { org: Org }) {
                   <td>{l.type}</td>
                   <td><span className={`status ${stageCls[l.stage] ?? 's-gray'}`}>{l.stage === 'Servicing' ? 'Active' : l.stage}</span></td>
                   <td><span className={`status ${payCls[l.payment_type]}`}>{l.payment_type}</span></td>
+                  <td>{reviewMap[l.id]?.length
+                    ? reviewMap[l.id].map(r => <span key={r} className="pill" style={{ marginRight: 4 }}>{r}</span>)
+                    : <span className="small">—</span>}</td>
                   <td>{pd ? <span className="status s-red"><Ico.x /> {pd.days}d · {money(pd.amount)}</span>
                     : payments.some(p => p.loan_id === l.id) ? <span className="status s-green"><Ico.check /> Current</span>
                     : <span className="small">—</span>}</td>
@@ -119,7 +149,7 @@ export default function Loans({ org }: { org: Org }) {
                 </tr>
               )
             })}
-            {!rows.length && <tr><td colSpan={11} className="small">No loans match these filters.</td></tr>}
+            {!rows.length && <tr><td colSpan={12} className="small">No loans match these filters.</td></tr>}
           </tbody>
         </table>
       </div>

@@ -31,6 +31,39 @@ export type Guarantor = { id: string; name: string; guarantee_pct: number | null
 export type Note = { id: string; body: string; author: string | null; created_at: string }
 export type Rule = { id: string; days_past_due: number; channel: 'email' | 'sms' | 'both'; subject: string | null; body: string; enabled: boolean }
 
+export type Spread = {
+  id: string; customer_id: string; period: string; statement_type: string
+  status: 'draft' | 'reviewed'; data: Record<string, number | null>; source_document_id: string | null
+}
+export const SPREAD_LINES: [string, string][] = [
+  ['revenue', 'Revenue'], ['cogs', 'Cost of goods sold'], ['opex', 'Operating expenses'],
+  ['ebitda', 'EBITDA'], ['depreciation', 'Depreciation & amort.'], ['interest_expense', 'Interest expense'],
+  ['net_income', 'Net income'], ['distributions', 'Distributions'],
+  ['total_debt', 'Total debt'], ['tangible_net_worth', 'Tangible net worth'],
+]
+export const SPREAD_DOC_TYPES = ['Tax Return', 'Financial Statement']
+export type Queued = { loan_number: string; company: string; channel: string; recipient: string; days_late: number; rule_days: number; subject: string | null; body: string }
+
+/** Auth-scoped call to the rules engine; dryRun returns the queue without sending. */
+export async function runRules(dryRun: boolean) {
+  const token = (await supabase.auth.getSession()).data.session?.access_token
+  const res = await fetch(`https://ngmpmyuwacwbwtqtinos.supabase.co/functions/v1/run-rules${dryRun ? '?dry_run=1' : ''}`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  return res.json()
+}
+
+/** Create a draft spread shell when a financial document lands on a customer. */
+export async function spreadFromDocument(orgId: string, customerId: string, docId: string, filename: string, docType: string) {
+  if (!SPREAD_DOC_TYPES.includes(docType)) return
+  const year = filename.match(/20\d{2}/)?.[0]
+  await supabase.from('financial_spreads').insert({
+    org_id: orgId, customer_id: customerId, source_document_id: docId,
+    period: year ? `FY ${year}` : 'New period', statement_type: docType, status: 'draft',
+  })
+}
+
 export const daysLate = (due: string) => Math.floor((Date.now() - new Date(due + 'T00:00:00').getTime()) / 86400000)
 export const pastDueOf = (payments: Payment[], loanId: string) => {
   const overdue = payments.filter(p => p.loan_id === loanId && p.status !== 'paid' && daysLate(p.due_date) > 0)
