@@ -1,33 +1,39 @@
-# CRE Screener — extraction API
+# CRE Screener — open-source model gateway
 
-Turns an offering memorandum into a typed deal sheet: **PDF → page images → Unlimited-OCR → Claude structured extraction**. The static site at crescreener.com calls this; the UI does the underwriting math itself.
+All AI runs on models you host: **Unlimited-OCR** (documents → markdown) + **Qwen3-32B-AWQ**
+(markdown → structured JSON via vLLM guided decoding, drafting, portfolio Q&A). No per-token
+API costs — your only bill is the GPU while it's powered on.
 
-## Run the OCR model (GPU box)
-
-Unlimited-OCR needs an NVIDIA GPU. Easiest is the official vLLM image, which exposes an OpenAI-compatible endpoint:
-
-```bash
-docker run --gpus all -p 8000:8000 vllm/vllm-openai:unlimited-ocr \
-  --model baidu/Unlimited-OCR --served-model-name Unlimited-OCR --max-model-len 32768
-```
-
-(SGLang works too — see the model README; point `OCR_BASE_URL` at whichever server you run.)
-
-## Run this API
+## Boot the stack (Lambda 1× A100, Lambda Stack image)
 
 ```bash
-cd server
-python3.10 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-export OCR_BASE_URL=http://<gpu-box>:8000/v1
-export ANTHROPIC_API_KEY=...           # or `ant auth login`
-uvicorn main:app --host 0.0.0.0 --port 8787
+git clone https://github.com/wilsoz1/crescreener && cd crescreener/server
+export SUPABASE_SERVICE_ROLE_KEY=...        # Supabase dashboard → settings → API
+export CADDY_DOMAIN=api.crescreener.com     # add an A record for this → the box IP
+docker compose up -d --build
 ```
 
-No GPU yet? `MOCK_OCR=1 uvicorn main:app --port 8787` skips OCR and feeds `sample_om.md` to the extractor, so you can exercise the full API + UI path.
+First boot downloads ~25GB of weights (cached in a volume; restarts are fast). Both models
+fit one 40GB A100. When you power the box off, the app keeps working — AI actions show as
+unavailable and everything else is unaffected.
 
 ## Point the site at it
 
-Open `https://crescreener.com/?api=https://<your-api-host>` once — the URL is remembered in the browser's localStorage. Without it the site runs in demo mode (bundled sample deal).
+Open `https://crescreener.com/?api=https://api.crescreener.com` once per browser.
 
-The API must be served over HTTPS for the HTTPS site to call it (put it behind Caddy / Cloudflare Tunnel / a cloud load balancer). CORS is open to crescreener.com and localhost dev by default (`ALLOWED_ORIGINS`).
+## Endpoints
+
+`GET /api/health` · `POST /api/extract` (OM → deal sheet) · `POST /api/spread`
+(document_id → populated spread draft) · `POST /api/classify` (content-based routing)
+· `POST /api/obligations` (loan agreement → ticklers + covenants) · `POST /api/draft`
+(annual review / portfolio brief) · `POST /api/ask` (NL question → whitelisted query → answer).
+
+All document endpoints take the caller's Supabase JWT and only touch that user's org.
+
+## Local dev without a GPU
+
+```bash
+MOCK=1 SUPABASE_SERVICE_ROLE_KEY=... uvicorn main:app --port 8787
+```
+
+`MOCK=1` returns canned model output so the full app loop is testable end to end.

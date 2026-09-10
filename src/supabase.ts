@@ -64,6 +64,43 @@ export async function spreadFromDocument(orgId: string, customerId: string, docI
   })
 }
 
+// ——— Deterministic covenant auto-testing (no model involved) ———
+// Computes covenant actuals from the newest reviewed spread + the loan's debt service,
+// so nobody types a ratio by hand. Covenants we can't compute are left untouched.
+export function autoTestCovenants(
+  loan: { next_payment_amount: number | null },
+  spreads: Spread[],
+  covenants: { id: string; name: string; requirement: string; actual: string | null; status: string }[],
+): { id: string; actual: string; status: 'Pass' | 'Near' | 'Fail' }[] {
+  const reviewed = spreads.filter(s => s.status === 'reviewed')
+  if (!reviewed.length) return []
+  const s = reviewed[reviewed.length - 1] // periods are sorted ascending
+  const n = (k: string) => (s.data[k] == null ? null : Number(s.data[k]))
+  const ds = loan.next_payment_amount ? loan.next_payment_amount * 12 : null
+  const ebitda = n('ebitda'), debt = n('total_debt'), tnw = n('tangible_net_worth'), dist = n('distributions')
+
+  const out: { id: string; actual: string; status: 'Pass' | 'Near' | 'Fail' }[] = []
+  for (const c of covenants) {
+    let value: number | null = null
+    if (/fixed.?charge/i.test(c.name)) value = ebitda != null && dist != null && ds ? (ebitda - dist) / ds : null
+    else if (/dscr|debt.?service/i.test(c.name)) value = ebitda != null && ds ? ebitda / ds : null
+    else if (/debt\s*\/\s*ebitda|leverage/i.test(c.name)) value = ebitda && debt != null ? debt / ebitda : null
+    else if (/tnw|tangible net worth/i.test(c.name)) value = tnw && debt != null ? debt / tnw : null
+    if (value == null) continue
+
+    const m = c.requirement.match(/([≥≤])\s*([\d.]+)\s*x/)
+    if (!m) continue
+    const threshold = parseFloat(m[2])
+    const atLeast = m[1] === '≥'
+    const pass = atLeast ? value >= threshold : value <= threshold
+    const near = pass && (atLeast ? value < threshold * 1.1 : value > threshold * 0.9)
+    const status: 'Pass' | 'Near' | 'Fail' = !pass ? 'Fail' : near ? 'Near' : 'Pass'
+    const actual = `${value.toFixed(2)}x (auto · ${s.period})`
+    if (actual !== c.actual || status !== c.status) out.push({ id: c.id, actual, status })
+  }
+  return out
+}
+
 export const daysLate = (due: string) => Math.floor((Date.now() - new Date(due + 'T00:00:00').getTime()) / 86400000)
 export const pastDueOf = (payments: Payment[], loanId: string) => {
   const overdue = payments.filter(p => p.loan_id === loanId && p.status !== 'paid' && daysLate(p.due_date) > 0)

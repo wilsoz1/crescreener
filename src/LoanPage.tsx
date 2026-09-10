@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { supabase, DbLoan, Doc, Org, ShareLink, Attempt, Payment, DbCovenant, DbTickler, Guarantor, Note, Spread, SPREAD_LINES, money, daysLate, spreadFromDocument } from './supabase'
+import { supabase, DbLoan, Doc, Org, ShareLink, Attempt, Payment, DbCovenant, DbTickler, Guarantor, Note, Spread, SPREAD_LINES, money, daysLate, spreadFromDocument, autoTestCovenants } from './supabase'
 import { fmtDate } from './Loans'
 import { classifyType } from './Documents'
+import { API_URL, aiSpread, aiProcessDocument } from './api'
 import { Ico } from './Icons'
 
 const shareUrl = (token: string) => `${window.location.origin}/#/share/${token}`
@@ -42,9 +43,11 @@ export default function LoanPage({ org, loanId }: { org: Org; loanId: string }) 
   const load = async () => {
     const { data: l } = await supabase.from('loans').select('*, customers(name, company, email, phone)').eq('id', loanId).single()
     setLoan((l as DbLoan) ?? null)
+    let freshSpreads: Spread[] = []
     if (l?.customer_id) {
-      supabase.from('financial_spreads').select('*').eq('customer_id', l.customer_id).order('period')
-        .then(({ data }) => setSpreads((data as Spread[]) ?? []))
+      const { data } = await supabase.from('financial_spreads').select('*').eq('customer_id', l.customer_id).order('period')
+      freshSpreads = (data as Spread[]) ?? []
+      setSpreads(freshSpreads)
     }
     const [d, s, pay, cov, tick, g, n, o] = await Promise.all([
       supabase.from('documents').select('*, loans(loan_number), customers(company)').eq('loan_id', loanId).order('created_at', { ascending: false }),
@@ -59,9 +62,20 @@ export default function LoanPage({ org, loanId }: { org: Org; loanId: string }) 
         : Promise.resolve({ data: [] }),
     ])
     setDocs((d.data as Doc[]) ?? []); setLinks((s.data as ShareLink[]) ?? [])
-    setPayments((pay.data as Payment[]) ?? []); setCovenants((cov.data as DbCovenant[]) ?? [])
+    setPayments((pay.data as Payment[]) ?? [])
     setTicklers((tick.data as DbTickler[]) ?? []); setGuarantors((g.data as Guarantor[]) ?? [])
     setNotes((n.data as Note[]) ?? []); setOutreach(((o as { data: Attempt[] | null }).data as Attempt[]) ?? [])
+
+    // Auto-test computable covenants from the newest reviewed spread and persist any changes.
+    let covRows = (cov.data as DbCovenant[]) ?? []
+    if (l) {
+      const updates = autoTestCovenants(l, freshSpreads, covRows)
+      for (const u of updates) {
+        await supabase.from('covenants').update({ actual: u.actual, status: u.status }).eq('id', u.id)
+        covRows = covRows.map(c => (c.id === u.id ? { ...c, actual: u.actual, status: u.status } : c))
+      }
+    }
+    setCovenants(covRows)
     setLoading(false)
   }
   useEffect(() => { load() }, [loanId])
@@ -233,6 +247,15 @@ function PaymentsTab({ loan, payments }: { loan: DbLoan; payments: Payment[] }) 
 function SpreadsTab({ loan, spreads, onChange }: { loan: DbLoan; spreads: Spread[]; onChange: () => void }) {
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState<Record<string, string>>({})
+  const [extracting, setExtracting] = useState<string | null>(null)
+
+  const extract = async (s: Spread) => {
+    if (!s.source_document_id) return
+    setExtracting(s.id)
+    await aiSpread(s.source_document_id)
+    setExtracting(null)
+    onChange()
+  }
 
   const startEdit = (s: Spread) => {
     setEditing(s.id)
@@ -308,6 +331,11 @@ function SpreadsTab({ loan, spreads, onChange }: { loan: DbLoan; spreads: Spread
                   </span>
                 ) : (
                   <span style={{ display: 'inline-flex', gap: 6 }}>
+                    {API_URL && s.status === 'draft' && s.source_document_id && (
+                      <button className="btn-dark" onClick={() => extract(s)} disabled={extracting === s.id}>
+                        {extracting === s.id ? 'Extracting…' : 'AI extract'}
+                      </button>
+                    )}
                     <button className="btn-light" onClick={() => startEdit(s)}>Edit</button>
                     <button className="btn-light" onClick={() => remove(s)}>Delete</button>
                   </span>
@@ -423,8 +451,15 @@ const DocumentsTab = ({ org, loan, docs, links, onChange }: { org: Org; loan: Db
           org_id: org.id, loan_id: loan.id, customer_id: loan.customer_id,
           filename: file.name, storage_path: path, doc_type: docType, confidence, status: 'routed',
         }).select().single()
-        // Financial statements & tax returns spawn a draft spread column for the analyst.
-        if (row && loan.customer_id) await spreadFromDocument(org.id, loan.customer_id, row.id, file.name, docType)
+        if (row && loan.customer_id) {
+          if (API_URL) {
+            // Gateway on: OCR + extraction populate the spread with no typing.
+            await aiProcessDocument(row.id, docType, true)
+          } else {
+            // Gateway off: create the empty draft column for manual entry.
+            await spreadFromDocument(org.id, loan.customer_id, row.id, file.name, docType)
+          }
+        }
       }
     }
     setBusy(null)

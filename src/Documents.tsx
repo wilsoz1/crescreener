@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase, Doc, Org, spreadFromDocument } from './supabase'
+import { API_URL, aiProcessDocument } from './api'
 import { Ico } from './Icons'
 
 type LoanLite = { id: string; loan_number: string; customer_id: string | null; customers: { company: string | null } | null }
@@ -65,7 +66,10 @@ export default function Documents({ org }: { org: Org }) {
         status: loan && docType !== 'Unclassified' ? 'routed' : 'needs_review',
       }).select().single()
       if (insErr) { setErr(`${file.name}: ${insErr.message}`); break }
-      if (row && loan?.customer_id) await spreadFromDocument(org.id, loan.customer_id, row.id, file.name, docType)
+      if (row) {
+        if (API_URL) await aiProcessDocument(row.id, docType, !!loan?.customer_id)
+        else if (loan?.customer_id) await spreadFromDocument(org.id, loan.customer_id, row.id, file.name, docType)
+      }
     }
     setBusy(null)
     load()
