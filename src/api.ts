@@ -41,6 +41,8 @@ export async function gatewayHealth(): Promise<'off' | 'mock' | 'up' | 'down'> {
 
 export const aiSpread = (documentId: string) => gw('/api/spread', { document_id: documentId })
 export const aiClassify = (documentId: string) => gw('/api/classify', { document_id: documentId })
+export const aiAsk = (question: string) => gw('/api/ask', { question }) as Promise<{ answer: string; rows: Record<string, unknown>[] } | null>
+export const aiDraft = (kind: 'annual_review' | 'brief', loanId?: string) => gw('/api/draft', { kind, loan_id: loanId ?? null }) as Promise<{ markdown: string } | null>
 
 /** After any upload: classify by content, then spread financial statements. Fire-and-forget. */
 export async function aiProcessDocument(documentId: string, docType: string, hasCustomer: boolean) {

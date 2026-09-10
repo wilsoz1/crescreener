@@ -3,6 +3,7 @@ import { supabase, DbLoan, Doc, Org, ShareLink, Attempt, Payment, DbCovenant, Db
 import { fmtDate } from './Loans'
 import { classifyType } from './Documents'
 import { API_URL, aiSpread, aiProcessDocument } from './api'
+import { DraftButton } from './Ai'
 import { Ico } from './Icons'
 
 const shareUrl = (token: string) => `${window.location.origin}/#/share/${token}`
@@ -118,6 +119,17 @@ export default function LoanPage({ org, loanId }: { org: Org; loanId: string }) 
         </div>
         <span className="spacer" />
         <div style={{ display: 'flex', gap: 8 }}>
+          <DraftButton
+            kind="annual_review" loanId={loanId} label="Draft annual review"
+            onSave={async md => {
+              const user = (await supabase.auth.getUser()).data.user
+              await supabase.from('loan_notes').insert({
+                org_id: org.id, loan_id: loanId, body: `[AI-drafted annual review]\n${md}`,
+                author: (user?.user_metadata?.full_name as string) ?? user?.email ?? 'Unknown', created_by: user?.id,
+              })
+              load()
+            }}
+          />
           <button className="btn-light" onClick={() => setTab('Activity')}>Add note</button>
           <ShareControls org={org} loanId={loanId} docs={docs} onChange={load} />
         </div>

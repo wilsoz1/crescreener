@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase, DbLoan, Deposit, CreditLine, Org, Payment, Attempt, money, pastDueOf, daysLate, runRules } from './supabase'
 import { OutreachLog, DelinquencyRules, QueuedMessages } from './Outreach'
 import DocRouting from './Documents'
+import { AskBar, DraftButton } from './Ai'
 import { Ico } from './Icons'
 
 const TABS = ['Overview', 'Portfolio', 'Operations'] as const
@@ -81,7 +82,10 @@ export default function Dashboard({ org }: { org: Org }) {
           <p className="subtitle" style={{ marginBottom: 0 }}>Invite code <b>{org.invite_code}</b> · all data scoped to your bank by row-level security</p>
         </div>
         <span className="spacer" />
-        <a className="btn-dark" href="#/app/screener" style={{ textDecoration: 'none' }}>Screen a new deal <Ico.chevron /></a>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <DraftButton kind="brief" label="Draft Monday brief" />
+          <a className="btn-dark" href="#/app/screener" style={{ textDecoration: 'none' }}>Screen a new deal <Ico.chevron /></a>
+        </div>
       </div>
 
       {healthy ? (
@@ -105,6 +109,7 @@ export default function Dashboard({ org }: { org: Org }) {
 
       {tab === 'Overview' && (
         <>
+          <AskBar />
           <div className="tiles" style={{ marginTop: 4 }}>
             <div className="tile"><div className="n">{loans.length}</div><div className="l">Total loans · {money(loanTotal)} committed</div></div>
             <div className="tile"><div className="n">{money(balanceTotal)}</div><div className="l">Outstanding loan balances</div></div>
