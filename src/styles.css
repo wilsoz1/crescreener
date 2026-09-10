@@ -289,3 +289,19 @@ select.mini { border: 1px solid var(--line); border-radius: 7px; padding: 5px 8p
 .note-form input { flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13.5px; }
 .note { padding: 10px 14px; border-bottom: 1px solid var(--line-2); font-size: 13.5px; line-height: 1.5; }
 .note:last-child { border-bottom: none; }
+
+/* Progressive disclosure loan page */
+.stat-row { display: flex; gap: 28px; flex-wrap: wrap; }
+.stat-row span { display: inline-flex; flex-direction: column; }
+.stat-row b { font-size: 17px; letter-spacing: -0.3px; font-variant-numeric: tabular-nums; }
+.stat-row i { font-style: normal; color: var(--sub); font-size: 12.5px; }
+.alert-strip.ok { border-color: #bfe3cc; background: #f2faf5; }
+.tab-badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; border-radius: 999px; font-size: 11px; font-weight: 700; margin-left: 6px; padding: 0 5px; vertical-align: 1px; }
+.tab-badge.red { background: var(--red); color: #fff; }
+.tab-badge.amber { background: var(--amber); color: #fff; }
+.dot2 { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.dot2.red { background: var(--red); }
+.dot2.amber { background: #d9860f; }
+.alert { display: flex; gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--line-2); align-items: center; }
+.alert:last-child { border-bottom: none; }
+.linkish { border: none; background: none; color: var(--accent); font: inherit; font-size: 13px; cursor: pointer; padding: 0; white-space: nowrap; }
