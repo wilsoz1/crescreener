@@ -14,14 +14,12 @@ export const fmtDate = (d: string | null) =>
 
 type Review = 'Covenant' | 'Annual review'
 type Filters = {
-  amountMin: string; amountMax: string
-  maturityFrom: string; maturityTo: string
   drawEndBy: string
   pay: Set<PaymentType>
   pastDueOnly: boolean
   reviews: Set<Review>
 }
-const EMPTY: Filters = { amountMin: '', amountMax: '', maturityFrom: '', maturityTo: '', drawEndBy: '', pay: new Set(), pastDueOnly: false, reviews: new Set() }
+const EMPTY: Filters = { drawEndBy: '', pay: new Set(), pastDueOnly: false, reviews: new Set() }
 
 export default function Loans({ org }: { org: Org }) {
   const [loans, setLoans] = useState<DbLoan[]>([])
@@ -54,10 +52,6 @@ export default function Loans({ org }: { org: Org }) {
   }, [org.id])
 
   const rows = useMemo(() => loans.filter(l => {
-    if (f.amountMin && l.amount < +f.amountMin) return false
-    if (f.amountMax && l.amount > +f.amountMax) return false
-    if (f.maturityFrom && (!l.maturity || l.maturity < f.maturityFrom)) return false
-    if (f.maturityTo && (!l.maturity || l.maturity > f.maturityTo)) return false
     if (f.drawEndBy && (!l.draw_period_end || l.draw_period_end > f.drawEndBy)) return false
     if (f.pay.size && !f.pay.has(l.payment_type)) return false
     if (f.pastDueOnly && !pastDueOf(payments, l.id)) return false
@@ -75,7 +69,7 @@ export default function Loans({ org }: { org: Org }) {
     reviews.has(r) ? reviews.delete(r) : reviews.add(r)
     setF({ ...f, reviews })
   }
-  const active = f.amountMin || f.amountMax || f.maturityFrom || f.maturityTo || f.drawEndBy || f.pay.size > 0 || f.pastDueOnly || f.reviews.size > 0
+  const active = f.drawEndBy || f.pay.size > 0 || f.pastDueOnly || f.reviews.size > 0
 
   if (loading) return <p className="subtitle">Loading loans…</p>
 
@@ -85,18 +79,6 @@ export default function Loans({ org }: { org: Org }) {
       <p className="subtitle">{rows.length} of {loans.length} loans · {money(rows.reduce((s, l) => s + l.amount, 0))} shown. Click a loan to open it.</p>
 
       <div className="filters">
-        <div className="f-group">
-          <span className="f-label"><Ico.dollar /> Amount</span>
-          <input type="number" placeholder="Min" value={f.amountMin} onChange={e => setF({ ...f, amountMin: e.target.value })} />
-          <span className="f-dash">–</span>
-          <input type="number" placeholder="Max" value={f.amountMax} onChange={e => setF({ ...f, amountMax: e.target.value })} />
-        </div>
-        <div className="f-group">
-          <span className="f-label"><Ico.cal /> Maturity</span>
-          <input type="date" value={f.maturityFrom} onChange={e => setF({ ...f, maturityFrom: e.target.value })} />
-          <span className="f-dash">–</span>
-          <input type="date" value={f.maturityTo} onChange={e => setF({ ...f, maturityTo: e.target.value })} />
-        </div>
         <div className="f-group">
           <span className="f-label"><Ico.clock /> Draw period ends by</span>
           <input type="date" value={f.drawEndBy} onChange={e => setF({ ...f, drawEndBy: e.target.value })} />
