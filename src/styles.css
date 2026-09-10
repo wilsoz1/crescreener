@@ -267,3 +267,25 @@ select.mini { border: 1px solid var(--line); border-radius: 7px; padding: 5px 8p
 .share-box .share-row { display: flex; gap: 10px; margin-top: 10px; }
 .share-box input { flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; font: inherit; font-size: 14px; background: #fff; }
 .uw-head a { text-decoration: none; }
+
+/* Servicing additions */
+.f-chip.red.on { background: var(--red); border-color: var(--red); }
+.alert-strip { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; border: 1px solid #f3c8c4; background: #fdf3f2; border-radius: 10px; padding: 10px 14px; margin-top: 8px; }
+.share-pop {
+  position: absolute; right: 0; top: 44px; z-index: 30; width: 360px; background: #fff;
+  border: 1px solid var(--line); border-radius: 12px; padding: 16px; box-shadow: 0 12px 32px rgba(0,0,0,.12); text-align: left;
+}
+.share-pop input { display: block; width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13.5px; margin-top: 8px; }
+.share-docs-list { max-height: 160px; overflow-y: auto; margin-top: 10px; border: 1px solid var(--line-2); border-radius: 8px; padding: 6px 10px; }
+.share-doc { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; font-weight: 400; }
+.share-doc input { width: auto; margin: 0; }
+.share-toast { position: absolute; right: 0; top: 44px; z-index: 29; background: var(--green-bg); color: var(--green); border: 1px solid #bfe3cc; border-radius: 10px; padding: 10px 14px; font-size: 13px; max-width: 420px; }
+.rule-form { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; padding: 14px; border-bottom: 1px solid var(--line-2); background: #fafbfc; }
+.rule-form label { font-size: 12.5px; font-weight: 600; color: var(--sub); }
+.rule-form input, .rule-form select, .rule-form textarea { display: block; margin-top: 5px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13.5px; background: #fff; width: 100%; }
+.rule-form label:first-child input { width: 90px; }
+.notes { padding-bottom: 4px; }
+.note-form { display: flex; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line-2); }
+.note-form input { flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13.5px; }
+.note { padding: 10px 14px; border-bottom: 1px solid var(--line-2); font-size: 13.5px; line-height: 1.5; }
+.note:last-child { border-bottom: none; }

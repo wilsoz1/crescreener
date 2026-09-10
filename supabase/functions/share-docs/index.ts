@@ -23,16 +23,22 @@ Deno.serve(async (req) => {
   if (!link) return json({ error: "This link is invalid." }, 404);
   if (link.revoked) return json({ error: "This link has been revoked by the lender." }, 410);
   if (new Date(link.expires_at) < new Date()) return json({ error: "This link has expired." }, 410);
+  if (link.passcode) {
+    const supplied = new URL(req.url).searchParams.get("passcode") ?? "";
+    if (supplied !== link.passcode) return json({ needs_passcode: true, error: supplied ? "Incorrect passcode." : "This room requires a passcode." }, 401);
+  }
 
   await admin.from("share_links")
     .update({ access_count: link.access_count + 1, last_accessed_at: new Date().toISOString() })
     .eq("id", link.id);
 
-  const { data: docs } = await admin
+  let q = admin
     .from("documents")
-    .select("filename, doc_type, storage_path, created_at")
+    .select("id, filename, doc_type, storage_path, created_at")
     .eq("loan_id", link.loan_id)
     .order("created_at", { ascending: false });
+  if (link.doc_ids?.length) q = q.in("id", link.doc_ids);
+  const { data: docs } = await q;
 
   const files = [];
   for (const d of docs ?? []) {

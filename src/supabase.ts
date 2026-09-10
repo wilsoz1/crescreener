@@ -14,15 +14,33 @@ export type DbLoan = {
   term: string | null; ltv: number | null; dscr: number | null; maturity: string | null
   collateral: string | null; rm: string | null; payment_type: PaymentType
   draw_period_end: string | null; origination_date: string | null; customer_id: string | null
+  current_balance: number | null; next_payment_amount: number | null; next_payment_date: string | null
+  io_end_date: string | null; rate_reset_date: string | null; rate_floor: string | null
+  budget_total: number | null; draws_to_date: number | null; interest_reserve_remaining: number | null
   customers: { name: string; company: string | null; email: string | null; phone: string | null } | null
 }
 export type ShareLink = {
   id: string; token: string; institution: string; expires_at: string; revoked: boolean
   access_count: number; last_accessed_at: string | null; created_at: string
+  passcode: string | null; doc_ids: string[] | null
+}
+export type Payment = { id: string; loan_id: string; due_date: string; amount: number; status: 'due' | 'paid' | 'late' | 'missed'; paid_date: string | null }
+export type DbCovenant = { id: string; name: string; requirement: string; actual: string | null; status: 'Pass' | 'Near' | 'Fail'; frequency: string | null; next_test: string | null; source: string | null }
+export type DbTickler = { id: string; requirement: string; responsible: string; frequency: string | null; due_date: string; status: 'open' | 'requested' | 'complete' | 'waived'; source: string | null }
+export type Guarantor = { id: string; name: string; guarantee_pct: number | null; guarantee_type: string | null; pfs_date: string | null; net_worth: number | null; liquidity: number | null }
+export type Note = { id: string; body: string; author: string | null; created_at: string }
+export type Rule = { id: string; days_past_due: number; channel: 'email' | 'sms' | 'both'; subject: string | null; body: string; enabled: boolean }
+
+export const daysLate = (due: string) => Math.floor((Date.now() - new Date(due + 'T00:00:00').getTime()) / 86400000)
+export const pastDueOf = (payments: Payment[], loanId: string) => {
+  const overdue = payments.filter(p => p.loan_id === loanId && p.status !== 'paid' && daysLate(p.due_date) > 0)
+  if (!overdue.length) return null
+  const oldest = overdue.reduce((a, b) => (a.due_date < b.due_date ? a : b))
+  return { days: daysLate(oldest.due_date), amount: overdue.reduce((s, p) => s + Number(p.amount), 0), count: overdue.length }
 }
 export type Deposit = { id: string; account_name: string; type: string; balance: number; opened: string | null; customers: { company: string | null; name: string } | null }
 export type CreditLine = { id: string; name: string; commitment: number; outstanding: number; rate: string | null; maturity: string | null; customers: { company: string | null; name: string } | null }
-export type Attempt = { id: string; channel: string; recipient: string; subject: string | null; body: string; status: string; error: string | null; created_at: string; customers: { name: string; company: string | null } | null }
+export type Attempt = { id: string; channel: string; recipient: string; subject: string | null; body: string; status: string; error: string | null; created_at: string; rule_id: string | null; customers: { name: string; company: string | null } | null }
 export type Doc = { id: string; filename: string; doc_type: string; confidence: number; status: string; created_at: string; loan_id: string | null; loans: { loan_number: string } | null; customers: { company: string | null } | null }
 
 export const money = (n: number) => `$${Math.round(n).toLocaleString()}`

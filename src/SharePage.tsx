@@ -12,17 +12,35 @@ type Payload = {
 export default function SharePage({ token }: { token: string }) {
   const [data, setData] = useState<Payload | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [needsPasscode, setNeedsPasscode] = useState(false)
+  const [passcode, setPasscode] = useState('')
+  const [attempted, setAttempted] = useState(false)
 
-  useEffect(() => {
-    fetch(`https://ngmpmyuwacwbwtqtinos.supabase.co/functions/v1/share-docs?token=${token}`)
+  const fetchRoom = (code?: string) => {
+    setErr(null)
+    fetch(`https://ngmpmyuwacwbwtqtinos.supabase.co/functions/v1/share-docs?token=${token}${code ? `&passcode=${encodeURIComponent(code)}` : ''}`)
       .then(async r => {
         const body = await r.json()
+        if (r.status === 401 && body.needs_passcode) { setNeedsPasscode(true); if (code) setErr('Incorrect passcode.'); return }
         if (!r.ok) throw new Error(body.error ?? 'Unable to open this link.')
+        setNeedsPasscode(false)
         setData(body)
       })
       .catch(e => setErr(e.message))
-  }, [token])
+  }
+  useEffect(() => { fetchRoom() }, [token])
 
+  if (needsPasscode) return (
+    <div className="auth-wrap">
+      <form className="auth-card" onSubmit={e => { e.preventDefault(); setAttempted(true); fetchRoom(passcode) }}>
+        <h2>Passcode required</h2>
+        <p className="small" style={{ marginBottom: 14 }}>The lender protected this document room with a passcode.</p>
+        <label>Passcode<input value={passcode} onChange={e => setPasscode(e.target.value)} required autoFocus /></label>
+        {attempted && err && <div className="demo-note">{err}</div>}
+        <button className="btn-dark" style={{ width: '100%', justifyContent: 'center', padding: 10 }}>Open room</button>
+      </form>
+    </div>
+  )
   if (err) return <div className="auth-wrap"><div className="auth-card"><h2>Link unavailable</h2><p className="small">{err}</p></div></div>
   if (!data) return <p className="subtitle" style={{ padding: 40 }}>Opening secure document room…</p>
 

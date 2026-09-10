@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase, DbLoan, Deposit, CreditLine, Org, money } from './supabase'
+import { supabase, DbLoan, Deposit, CreditLine, Org, Payment, money, pastDueOf, daysLate } from './supabase'
 import { Ico } from './Icons'
 
 const stageCls: Record<string, string> = {
@@ -11,6 +11,8 @@ export default function Dashboard({ org }: { org: Org }) {
   const [loans, setLoans] = useState<DbLoan[]>([])
   const [deposits, setDeposits] = useState<Deposit[]>([])
   const [locs, setLocs] = useState<CreditLine[]>([])
+  const [payments, setPayments] = useState<Payment[]>([])
+  const [risk, setRisk] = useState({ covFails: 0, covNear: 0, tickPastDue: 0 })
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -18,10 +20,21 @@ export default function Dashboard({ org }: { org: Org }) {
       supabase.from('loans').select('*, customers(name, company)').order('created_at', { ascending: false }),
       supabase.from('deposits').select('*, customers(name, company)').order('balance', { ascending: false }),
       supabase.from('credit_lines').select('*, customers(name, company)').order('commitment', { ascending: false }),
-    ]).then(([l, d, c]) => {
+      supabase.from('loan_payments').select('id, loan_id, due_date, amount, status, paid_date'),
+      supabase.from('covenants').select('status'),
+      supabase.from('ticklers').select('due_date, status'),
+    ]).then(([l, d, c, p, cov, tick]) => {
       setLoans((l.data as DbLoan[]) ?? [])
       setDeposits((d.data as Deposit[]) ?? [])
       setLocs((c.data as CreditLine[]) ?? [])
+      setPayments((p.data as Payment[]) ?? [])
+      const covs = (cov.data as { status: string }[]) ?? []
+      const ticks = (tick.data as { due_date: string; status: string }[]) ?? []
+      setRisk({
+        covFails: covs.filter(x => x.status === 'Fail').length,
+        covNear: covs.filter(x => x.status === 'Near').length,
+        tickPastDue: ticks.filter(t => (t.status === 'open' || t.status === 'requested') && daysLate(t.due_date) > 0).length,
+      })
       setLoading(false)
     })
   }, [org.id])
@@ -31,6 +44,8 @@ export default function Dashboard({ org }: { org: Org }) {
   const commitTotal = locs.reduce((s, c) => s + c.commitment, 0)
   const outTotal = locs.reduce((s, c) => s + c.outstanding, 0)
   const util = commitTotal ? outTotal / commitTotal : 0
+  const pastDueLoans = loans.filter(l => pastDueOf(payments, l.id))
+  const pastDueTotal = pastDueLoans.reduce((s, l) => s + (pastDueOf(payments, l.id)?.amount ?? 0), 0)
 
   if (loading) return <p className="subtitle">Loading portfolio…</p>
 
@@ -47,6 +62,18 @@ export default function Dashboard({ org }: { org: Org }) {
           <div className="n">{(util * 100).toFixed(0)}%</div>
           <div className="l">Line utilization ({money(outTotal)} drawn)</div>
           <div className="bar"><span style={{ width: `${Math.min(util * 100, 100)}%` }} /></div>
+        </div>
+        <a className="tile rowlink" href="#/app/loans" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <div className="n" style={{ color: pastDueLoans.length ? 'var(--red)' : 'inherit' }}>{pastDueLoans.length}</div>
+          <div className="l">Past-due loans{pastDueLoans.length ? ` · ${money(pastDueTotal)}` : ''}</div>
+        </a>
+        <div className="tile">
+          <div className="n" style={{ color: risk.covFails ? 'var(--red)' : 'inherit' }}>{risk.covFails}<span style={{ fontSize: 15, color: 'var(--amber)' }}> +{risk.covNear} near</span></div>
+          <div className="l">Covenant failures</div>
+        </div>
+        <div className="tile">
+          <div className="n" style={{ color: risk.tickPastDue ? 'var(--amber)' : 'inherit' }}>{risk.tickPastDue}</div>
+          <div className="l">Reporting items past due</div>
         </div>
       </div>
 
