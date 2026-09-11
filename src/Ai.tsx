@@ -67,8 +67,8 @@ export function AskBar() {
   )
 }
 
-export function DraftButton({ kind, loanId, label, onSave }: {
-  kind: 'annual_review' | 'brief'; loanId?: string; label: string
+export function DraftButton({ kind, loanId, dealId, label, onSave }: {
+  kind: 'annual_review' | 'brief' | 'credit_memo'; loanId?: string; dealId?: string; label: string
   onSave?: (markdown: string) => Promise<void>
 }) {
   const [busy, setBusy] = useState(false)
@@ -78,7 +78,7 @@ export function DraftButton({ kind, loanId, label, onSave }: {
 
   const run = async () => {
     setBusy(true); setSaved(false)
-    const out = await aiDraft(kind, loanId)
+    const out = await aiDraft(kind, loanId, dealId)
     setBusy(false)
     setText(out?.markdown ?? 'The model box is not reachable right now — power it on and try again.')
   }

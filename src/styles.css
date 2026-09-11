@@ -335,3 +335,18 @@ button.tile { font: inherit; text-align: left; cursor: pointer; }
   .spin { animation: none; border-top-color: var(--line); }
 }
 .compose-inline .small { overflow-wrap: anywhere; min-width: 0; }
+
+/* Deal pipeline + workspace */
+.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.stage-track { display: flex; flex-wrap: wrap; gap: 4px; margin: 10px 0 2px; }
+.stage-dot { font-size: 11.5px; font-weight: 600; color: var(--faint); padding: 3px 9px; border-radius: 999px; background: var(--gray-bg); }
+.stage-dot.done { color: var(--green); background: var(--green-bg); }
+.stage-dot.on { color: #fff; background: var(--ink); }
+
+/* Global search */
+.gsearch { position: relative; display: flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 8px; padding: 5px 9px; background: #fff; color: var(--sub); }
+.gsearch input { border: none; outline: none; font: inherit; font-size: 13px; width: 150px; }
+.gsearch-pop { position: absolute; top: 36px; right: 0; z-index: 50; width: 360px; background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,.12); overflow: hidden; }
+.gsearch-pop a { display: flex; align-items: center; gap: 8px; padding: 9px 12px; color: var(--ink); text-decoration: none; border-bottom: 1px solid var(--line-2); font-size: 13.5px; }
+.gsearch-pop a:last-child { border-bottom: none; }
+.gsearch-pop a:hover, .gsearch-pop a:focus-visible { background: var(--hover); }

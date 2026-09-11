@@ -6,6 +6,9 @@ import LoanDetail from './LoanDetail'
 import Dashboard from './Dashboard'
 import Loans from './Loans'
 import LoanPage from './LoanPage'
+import Deals from './Deals'
+import DealPage from './DealPage'
+import Search from './Search'
 import SharePage from './SharePage'
 import { SignIn, Onboarding } from './Auth'
 import { useSession } from './useSession'
@@ -56,6 +59,7 @@ export default function App() {
             {authed && app.org ? (
               <>
                 <a href="#/app" className={appTab === 'dashboard' ? 'on' : ''}>Dashboard</a>
+                <a href="#/app/deals" className={appTab === 'deals' ? 'on' : ''}>Deals</a>
                 <a href="#/app/loans" className={appTab === 'loans' ? 'on' : ''}>Loans</a>
                 <a href="#/app/screener" className={appTab === 'screener' ? 'on' : ''}>Screener</a>
               </>
@@ -67,6 +71,7 @@ export default function App() {
             )}
           </nav>
           <span className="spacer" />
+          {authed && app.org && <Search />}
           {authed ? (
             <>
               <span className="edited">{app.org?.name ?? app.session?.user.email}</span>
@@ -90,6 +95,8 @@ export default function App() {
             app.loading ? <p className="subtitle">Loading…</p>
             : !authed ? null
             : !app.org ? <Onboarding app={app} />
+            : appTab === 'deals' && subId ? <DealPage org={app.org} dealId={subId} />
+            : appTab === 'deals' ? <Deals org={app.org} />
             : appTab === 'loans' && subId ? <LoanPage org={app.org} loanId={subId} />
             : appTab === 'loans' ? <Loans org={app.org} />
             : appTab === 'screener' ? <Screener org={app.org} />

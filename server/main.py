@@ -356,13 +356,36 @@ def obligations(req: DocReq, orgs: List[str] = Depends(caller_orgs)):
 
 
 class DraftReq(BaseModel):
-    kind: str  # 'annual_review' | 'brief'
+    kind: str  # 'annual_review' | 'brief' | 'credit_memo'
     loan_id: Optional[str] = None
+    deal_id: Optional[str] = None
 
 
 @app.post("/api/draft")
 def draft(req: DraftReq, orgs: List[str] = Depends(caller_orgs)):
     org = orgs[0]
+    if req.kind == "credit_memo" and req.deal_id:
+        deal = sb("deals", params={"id": f"eq.{req.deal_id}", "select": "*, customers(name, company)"})[0]
+        if deal["org_id"] not in orgs:
+            raise HTTPException(404, "deal not found")
+        ctx = {
+            "deal": deal,
+            "facilities": sb("facilities", params={"deal_id": f"eq.{req.deal_id}", "select": "facility_type, amount, rate_display, term_months, amort_months"}),
+            "parties": sb("deal_parties", params={"deal_id": f"eq.{req.deal_id}", "select": "name, role, ownership_pct"}),
+            "collateral": sb("collateral", params={"deal_id": f"eq.{req.deal_id}", "select": "collateral_type, description, value, advance_rate"}),
+            "exceptions": sb("deal_exceptions", params={"deal_id": f"eq.{req.deal_id}", "select": "rule_name, requirement, actual, status, mitigants"}),
+            "conditions": sb("conditions", params={"deal_id": f"eq.{req.deal_id}", "select": "category, item, status"}),
+            "spreads": sb("financial_spreads", params={"customer_id": f"eq.{deal['customer_id']}", "select": "period, data, status"}) if deal.get("customer_id") else [],
+        }
+        text = llm_text(
+            "You are a commercial bank credit analyst. Write a complete credit approval memo with sections: "
+            "Executive summary, Request & structure, Borrower & ownership, Financial analysis, Collateral, "
+            "Policy exceptions & mitigants, Conditions, Strengths, Weaknesses, Recommendation. "
+            "Use only the data provided; never invent figures.",
+            json.dumps(ctx, default=str)[:24000],
+            mock="## Credit memo — Riverbend Medical Partners\n**Request:** $5,250,000 across three facilities (CRE term, equipment, revolver) for practice acquisition.\n**Financial:** Insufficient spread history on the borrower; underwriting relies on practice cash flow and guarantor strength.\n**Collateral:** $6.75MM gross; blended LTV 77.8% — exceeds the 75% policy cap (exception open).\n**Recommendation:** Approve with conditions, subject to LTV exception approval and equity verification.",
+        )
+        return {"markdown": text}
     if req.kind == "annual_review" and req.loan_id:
         loan = sb("loans", params={"id": f"eq.{req.loan_id}", "select": "*, customers(name, company)"})[0]
         if loan["org_id"] not in orgs:
