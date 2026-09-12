@@ -8,6 +8,7 @@ import {
 import { DbLoan } from './supabase'
 import { fmtDate } from './Loans'
 import { DraftButton } from './Ai'
+import { confirmDialog, promptDialog, toast, currentUserName, Skeleton } from './dialogs'
 import { Ico } from './Icons'
 
 const TABS = ['Overview', 'Facilities', 'Parties', 'Policy & Rating', 'Approvals', 'Conditions', 'Closing & Funding'] as const
@@ -20,7 +21,7 @@ const Card = ({ title, sub, right, children }: { title: string; sub?: string; ri
   </div>
 )
 
-export default function DealPage({ org, dealId }: { org: Org; dealId: string }) {
+export default function DealPage({ org, dealId, initialTab }: { org: Org; dealId: string; initialTab?: string }) {
   const [deal, setDeal] = useState<Deal | null>(null)
   const [facilities, setFacilities] = useState<Facility[]>([])
   const [parties, setParties] = useState<Party[]>([])
@@ -35,7 +36,11 @@ export default function DealPage({ org, dealId }: { org: Org; dealId: string }) 
   const [envelopes, setEnvelopes] = useState<Envelope[]>([])
   const [spreads, setSpreads] = useState<Spread[]>([])
   const [loans, setLoans] = useState<DbLoan[]>([])
-  const [tab, setTab] = useState<Tab>('Overview')
+  const [tab, setTabState] = useState<Tab>((TABS as readonly string[]).includes(initialTab ?? '') ? (initialTab as Tab) : 'Overview')
+  const setTab = (t: Tab) => {
+    setTabState(t)
+    history.replaceState(null, '', `#/app/deals/${dealId}/${encodeURIComponent(t)}`)
+  }
   const [loading, setLoading] = useState(true)
 
   const load = async () => {
@@ -73,7 +78,7 @@ export default function DealPage({ org, dealId }: { org: Org; dealId: string }) 
 
   const metrics = useMemo(() => (deal ? dealMetrics(facilities, collateral, spreads, deal) : null), [deal, facilities, collateral, spreads])
 
-  if (loading || !deal || !metrics) return <p className="subtitle">Loading deal…</p>
+  if (loading || !deal || !metrics) return <Skeleton rows={7} />
 
   const openEx = exceptions.filter(e => e.status === 'open')
   const pendingAp = approvals.filter(a => a.decision === 'Pending')
@@ -96,7 +101,7 @@ export default function DealPage({ org, dealId }: { org: Org; dealId: string }) 
 
   return (
     <>
-      <div className="crumb-row"><a href="#/app/deals">← Deal pipeline</a></div>
+      <div className="crumb-row"><a href="#/app/pipeline">← Pipeline</a></div>
       <div className="viewbar" style={{ marginBottom: 4, alignItems: 'flex-start' }}>
         <div>
           <h1 style={{ marginBottom: 2 }}>{deal.name}</h1>
@@ -125,7 +130,15 @@ export default function DealPage({ org, dealId }: { org: Org; dealId: string }) 
         })}
       </div>
 
-      {healthy && !pendingAp.length && !openCond.length ? (
+      {deal.stage === 'Funded' && facilities.some(f => f.loan_id) && (
+        <div className="alert-strip ok">
+          <span className="status s-green"><Ico.check /> Funded</span>
+          <span className="small">Booked as {facilities.filter(f => f.loan_id).map((f, i) => (
+            <span key={f.id}>{i > 0 && ', '}<a className="cell-link" href={`#/app/loans/${f.loan_id}`}>{loans.find(l => l.id === f.loan_id)?.loan_number ?? 'loan'}</a></span>
+          ))} — servicing continues on the loan record{facilities.filter(f => f.loan_id).length > 1 ? 's' : ''}.</span>
+        </div>
+      )}
+      {deal.stage !== 'Funded' && (healthy && !pendingAp.length && !openCond.length ? (
         <div className="alert-strip ok"><span className="status s-green"><Ico.check /> Nothing blocking this deal</span></div>
       ) : (
         <div className="alert-strip">
@@ -135,7 +148,7 @@ export default function DealPage({ org, dealId }: { org: Org; dealId: string }) 
           {openCond.length > 0 && <span className="status s-amber"><Ico.clock /> {openCond.length} condition{openCond.length > 1 ? 's' : ''} outstanding</span>}
           {srcTotal !== useTotal && <span className="status s-red"><Ico.x /> Sources ≠ uses ({money(srcTotal)} vs {money(useTotal)})</span>}
         </div>
-      )}
+      ))}
 
       <div className="detail-tabs" style={{ marginTop: 16 }}>
         {TABS.map(t => (
@@ -245,7 +258,7 @@ function FacilitiesTab({ facilities, spreads }: { facilities: Facility[]; spread
               return (
                 <React.Fragment key={f.id}>
                   <tr className="rowlink" onClick={() => setOpen(o => (o === f.id ? null : f.id))}>
-                    <td><b>{f.facility_type}</b>{f.loan_id && <span className="status s-green" style={{ marginLeft: 8 }}><Ico.check /> Booked</span>}</td>
+                    <td><b>{f.facility_type}</b>{f.loan_id && <a className="cell-link" href={`#/app/loans/${f.loan_id}`} style={{ marginLeft: 8 }} onClick={e => e.stopPropagation()}>Booked →</a>}</td>
                     <td className="num mono">{money(f.amount)}</td>
                     <td className="mono">{f.rate_display ?? '—'}</td>
                     <td className="num mono">{f.term_months ?? '—'} / {f.amort_months ?? 'IO'}</td>
@@ -352,10 +365,11 @@ function PolicyTab({ org, deal, rules, metrics, exceptions, approvals, onChange 
     onChange()
   }
   const decide = async (e: DealException, status: 'approved' | 'declined') => {
-    const approver = window.prompt(`${status === 'approved' ? 'Approve' : 'Decline'} exception "${e.rule_name}" — approver name:`)
+    const approver = await promptDialog(`${status === 'approved' ? 'Approve' : 'Decline'} exception`, 'Approver name (logged)', { body: `${e.rule_name} — ${e.actual}`, initial: await currentUserName(), confirmText: status === 'approved' ? 'Approve' : 'Decline' })
     if (!approver) return
-    const mitigants = status === 'approved' ? window.prompt('Mitigants (recorded on the exception):') ?? '' : null
+    const mitigants = status === 'approved' ? await promptDialog('Mitigants', 'Recorded on the exception', { confirmText: 'Save' }) ?? '' : null
     await supabase.from('deal_exceptions').update({ status, approver, mitigants, decided_at: new Date().toISOString() }).eq('id', e.id)
+    toast(`Exception ${status}`)
     onChange()
   }
   const saveOverride = async (e: React.FormEvent) => {
@@ -440,10 +454,10 @@ function PolicyTab({ org, deal, rules, metrics, exceptions, approvals, onChange 
 // ——— Approvals ———
 function ApprovalsTab({ approvals, onChange }: { approvals: Approval[]; onChange: () => void }) {
   const decide = async (a: Approval, decision: string) => {
-    const approver = window.prompt(`${decision} — approver name:`, a.approver ?? '')
+    const approver = await promptDialog(decision, 'Approver name (logged)', { body: `${a.role_label} — step ${a.step_order}`, initial: a.approver ?? await currentUserName(), confirmText: decision })
     if (!approver) return
-    const comment = window.prompt('Comment (optional):') ?? null
-    await supabase.from('deal_approvals').update({ decision, approver, comment, decided_at: new Date().toISOString() }).eq('id', a.id)
+    await supabase.from('deal_approvals').update({ decision, approver, decided_at: new Date().toISOString() }).eq('id', a.id)
+    toast(`${a.role_label}: ${decision}`)
     onChange()
   }
   return (
@@ -481,15 +495,19 @@ function ConditionsTab({ org, dealId, conditions, orders, onChange }: {
   const [category, setCategory] = useState('Credit')
   const advance = async (c: Condition) => {
     const next = c.status === 'open' ? 'received' : 'satisfied'
-    const evidence = next === 'satisfied' ? window.prompt('Evidence (file name, note — required):', c.evidence ?? '') : c.evidence
+    const evidence = next === 'satisfied'
+      ? await promptDialog('Satisfy condition', 'Evidence (file name or note — required)', { body: c.item, initial: c.evidence ?? '', confirmText: 'Satisfy' })
+      : c.evidence
     if (next === 'satisfied' && !evidence) return
     await supabase.from('conditions').update({ status: next, evidence }).eq('id', c.id)
+    toast(next === 'satisfied' ? 'Condition satisfied' : 'Marked received')
     onChange()
   }
   const waive = async (c: Condition) => {
-    const who = window.prompt(`Waive "${c.item}" — waiver authority name (logged):`)
+    const who = await promptDialog('Waive condition', 'Waiver authority (logged)', { body: c.item, initial: await currentUserName(), confirmText: 'Waive' })
     if (!who) return
     await supabase.from('conditions').update({ status: 'waived', waived_by: who }).eq('id', c.id)
+    toast('Condition waived')
     onChange()
   }
   const add = async (e: React.FormEvent) => {
@@ -588,17 +606,18 @@ function ClosingTab({ org, deal, facilities, approvals, conditions, screenings, 
   }
   const authorize = async () => {
     if (!funding) return
-    const who = window.prompt('Second authorizer name (must differ from preparer — dual control):')
+    const who = await promptDialog('Authorize funding', 'Second authorizer (must differ from preparer)', { body: `Prepared by ${funding.prepared_by} · net proceeds ${money(funding.net_proceeds)} to ${funding.wire_recipient}`, initial: await currentUserName(), confirmText: 'Authorize' })
     if (!who) return
     if (who.trim().toLowerCase() === (funding.prepared_by ?? '').trim().toLowerCase()) {
-      window.alert('Dual control: the second authorizer cannot be the preparer.')
+      toast('Dual control: the second authorizer cannot be the preparer')
       return
     }
     await supabase.from('funding_auths').update({ status: 'authorized', approved_by: who }).eq('id', funding.id)
+    toast('Funding authorized')
     onChange()
   }
   const bookToCore = async () => {
-    if (!window.confirm(`Book ${facilities.length} facilit${facilities.length === 1 ? 'y' : 'ies'} to the core as loans? Terms flow straight from the approved structure — no re-keying.`)) return
+    if (!(await confirmDialog(`Book ${facilities.length} facilit${facilities.length === 1 ? 'y' : 'ies'} to the core?`, 'Terms flow straight from the approved structure — no re-keying.', { confirmText: 'Book & fund' }))) return
     const year = new Date().getFullYear()
     for (const f of facilities.filter(f => !f.loan_id)) {
       const m = facilityMath(f)
@@ -624,6 +643,7 @@ function ClosingTab({ org, deal, facilities, approvals, conditions, screenings, 
     }
     if (funding) await supabase.from('funding_auths').update({ status: 'funded', funded_at: new Date().toISOString() }).eq('id', funding.id)
     await supabase.from('deals').update({ stage: 'Funded' }).eq('id', deal.id)
+    toast('Booked to core — loans created, deal funded')
     onChange()
   }
 

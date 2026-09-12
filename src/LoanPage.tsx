@@ -3,6 +3,7 @@ import { supabase, DbLoan, Doc, Org, ShareLink, Attempt, Payment, DbCovenant, Db
 import { fmtDate } from './Loans'
 import { classifyType } from './Documents'
 import { API_URL, aiSpread, aiProcessDocument } from './api'
+import { confirmDialog, promptDialog, toast, currentUserName, Skeleton } from './dialogs'
 import { DraftButton } from './Ai'
 import { Ico } from './Icons'
 
@@ -27,7 +28,7 @@ const tickStatus = (t: DbTickler) => {
   return <span className={`status ${t.status === 'requested' ? 's-amber' : 's-gray'}`}>{t.status === 'requested' ? 'Requested' : 'Upcoming'}</span>
 }
 
-export default function LoanPage({ org, loanId }: { org: Org; loanId: string }) {
+export default function LoanPage({ org, loanId, initialTab }: { org: Org; loanId: string; initialTab?: string }) {
   const [loan, setLoan] = useState<DbLoan | null>(null)
   const [docs, setDocs] = useState<Doc[]>([])
   const [links, setLinks] = useState<ShareLink[]>([])
@@ -39,7 +40,12 @@ export default function LoanPage({ org, loanId }: { org: Org; loanId: string }) 
   const [notes, setNotes] = useState<Note[]>([])
   const [spreads, setSpreads] = useState<Spread[]>([])
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState<Tab>('Overview')
+  const [tab, setTabState] = useState<Tab>((TABS as readonly string[]).includes(initialTab ?? '') ? (initialTab as Tab) : 'Overview')
+  const setTab = (t: Tab) => {
+    setTabState(t)
+    history.replaceState(null, '', `#/app/loans/${loanId}/${encodeURIComponent(t)}`)
+  }
+  const [fromDeal, setFromDeal] = useState<{ id: string; name: string } | null>(null)
 
   const load = async () => {
     const { data: l } = await supabase.from('loans').select('*, customers(name, company, email, phone)').eq('id', loanId).single()
@@ -79,9 +85,16 @@ export default function LoanPage({ org, loanId }: { org: Org; loanId: string }) 
     setCovenants(covRows)
     setLoading(false)
   }
-  useEffect(() => { load() }, [loanId])
+  useEffect(() => {
+    load()
+    supabase.from('facilities').select('deal_id, deals(name)').eq('loan_id', loanId).limit(1)
+      .then(({ data }) => {
+        const row = data?.[0] as { deal_id: string; deals: { name: string } | null } | undefined
+        if (row) setFromDeal({ id: row.deal_id, name: row.deals?.name ?? 'deal' })
+      })
+  }, [loanId])
 
-  if (loading) return <p className="subtitle">Loading loan…</p>
+  if (loading) return <Skeleton rows={7} />
   if (!loan) return <><h1>Loan not found</h1><p className="subtitle"><a href="#/app/loans">Back to all loans</a></p></>
 
   // Issue rollup — drives the header strip, the badges, and the Overview triage list.
@@ -103,7 +116,7 @@ export default function LoanPage({ org, loanId }: { org: Org; loanId: string }) 
 
   return (
     <>
-      <div className="crumb-row"><a href="#/app/loans">← All loans</a></div>
+      <div className="crumb-row"><a href="#/app/portfolio">← Portfolio</a>{fromDeal && <span className="small"> · originated from <a className="cell-link" href={`#/app/deals/${fromDeal.id}`}>{fromDeal.name}</a></span>}</div>
 
       {/* Level 0: identity + health + actions */}
       <div className="viewbar" style={{ marginBottom: 4, alignItems: 'flex-start' }}>
@@ -280,8 +293,9 @@ function SpreadsTab({ loan, spreads, onChange }: { loan: DbLoan; spreads: Spread
     onChange()
   }
   const remove = async (s: Spread) => {
-    if (!window.confirm(`Delete the ${s.period} spread? This cannot be undone.`)) return
+    if (!(await confirmDialog(`Delete the ${s.period} spread?`, 'This cannot be undone.', { danger: true, confirmText: 'Delete' }))) return
     await supabase.from('financial_spreads').delete().eq('id', s.id)
+    toast(`${s.period} spread deleted`)
     onChange()
   }
 
@@ -455,8 +469,9 @@ const DocumentsTab = ({ org, loan, docs, links, onChange }: { org: Org; loan: Db
   const [busy, setBusy] = useState<string | null>(null)
   const [drag, setDrag] = useState(false)
   const revoke = async (s: ShareLink) => {
-    if (!window.confirm(`Revoke the link shared with ${s.institution}? They will lose access immediately.`)) return
+    if (!(await confirmDialog(`Revoke ${s.institution}'s link?`, 'They will lose access immediately.', { danger: true, confirmText: 'Revoke' }))) return
     await supabase.from('share_links').update({ revoked: true }).eq('id', s.id)
+    toast('Link revoked')
     onChange()
   }
 
@@ -648,6 +663,7 @@ function ShareControls({ org, loanId, docs, onChange }: { org: Org; loanId: stri
     if (!error && data) {
       setJustCreated(shareUrl(data.token))
       navigator.clipboard?.writeText(shareUrl(data.token)).catch(() => {})
+      toast(`Share link for ${institution} created & copied`)
       setOpen(false); setInstitution(''); setPasscode(''); setSelected(new Set())
       onChange()
     }

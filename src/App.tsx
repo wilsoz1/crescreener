@@ -1,18 +1,19 @@
 import { useEffect, useState } from 'react'
 import Marketing from './Marketing'
 import Screener from './Screener'
-import Portfolio from './Portfolio'
-import LoanDetail from './LoanDetail'
-import Dashboard from './Dashboard'
-import Loans from './Loans'
-import LoanPage from './LoanPage'
+import Today from './Today'
 import Deals from './Deals'
 import DealPage from './DealPage'
+import Loans from './Loans'
+import LoanPage from './LoanPage'
+import Borrowers, { BorrowerPage } from './Borrowers'
+import Operations from './Operations'
 import Search from './Search'
 import SharePage from './SharePage'
 import { SignIn, Onboarding } from './Auth'
 import { useSession } from './useSession'
 import { supabase } from './supabase'
+import { DialogHost } from './dialogs'
 import { Ico } from './Icons'
 
 const useHash = () => {
@@ -25,58 +26,46 @@ const useHash = () => {
   return hash
 }
 
+const NAV = [
+  { href: '#/app', key: '', icon: Ico.status, label: 'Today' },
+  { href: '#/app/pipeline', key: 'pipeline', icon: Ico.sort, label: 'Pipeline' },
+  { href: '#/app/portfolio', key: 'portfolio', icon: Ico.doc, label: 'Portfolio' },
+  { href: '#/app/borrowers', key: 'borrowers', icon: Ico.building, label: 'Borrowers' },
+  { href: '#/app/screener', key: 'screener', icon: Ico.search, label: 'Screener' },
+  { href: '#/app/operations', key: 'operations', icon: Ico.sliders, label: 'Operations' },
+]
+// Detail routes highlight their parent section.
+const PARENT: Record<string, string> = { deals: 'pipeline', loans: 'portfolio' }
+
 export default function App() {
   const hash = useHash()
   const app = useSession()
   const route = hash.replace(/^#\//, '')
-  const [section, sub, subId] = route.split('/')
+  const parts = route.split('/').map(decodeURIComponent)
+  const [section, sub, subId, sub2] = parts
   const authed = !!app.session
 
-  // Auth-only sections bounce to sign-in.
   useEffect(() => {
     if (!app.loading && section === 'app' && !authed) window.location.hash = '#/signin'
   }, [app.loading, section, authed])
 
-  // Public share links render standalone — no app chrome, no auth. (After all hooks.)
+  // Public share room: standalone, no chrome.
   if (section === 'share' && sub) {
-    return (
-      <>
-        <div className="window-title">CRE Screener</div>
-        <div className="frame"><SharePage token={sub} /></div>
-      </>
-    )
+    return <div className="pub"><SharePage token={sub} /></div>
   }
 
-  const appTab = section === 'app' ? (sub ?? 'dashboard') : null
-
-  return (
-    <>
-      <div className="window-title">CRE Screener</div>
-      <div className="frame">
+  // ——— Public site (marketing / auth / demo screener) ———
+  if (section !== 'app') {
+    return (
+      <div className="pub">
         <header className="topbar">
           <a className="brand" href="#/" aria-label="CRE Screener home" style={{ color: 'inherit' }}><Ico.logo /></a>
           <nav className="navlinks">
-            {authed && app.org ? (
-              <>
-                <a href="#/app" className={appTab === 'dashboard' ? 'on' : ''}>Dashboard</a>
-                <a href="#/app/deals" className={appTab === 'deals' ? 'on' : ''}>Deals</a>
-                <a href="#/app/loans" className={appTab === 'loans' ? 'on' : ''}>Loans</a>
-                <a href="#/app/screener" className={appTab === 'screener' ? 'on' : ''}>Screener</a>
-              </>
-            ) : (
-              <>
-                <a href="#/screener" className={section === 'screener' ? 'on' : ''}>Screener demo</a>
-                <a href="#/portfolio" className={section === 'portfolio' || section === 'loans' ? 'on' : ''}>Portfolio demo</a>
-              </>
-            )}
+            <a href="#/screener" className={section === 'screener' ? 'on' : ''}>Try the screener</a>
           </nav>
           <span className="spacer" />
-          {authed && app.org && <Search />}
           {authed ? (
-            <>
-              <span className="edited">{app.org?.name ?? app.session?.user.email}</span>
-              <button className="btn-light" onClick={() => supabase.auth.signOut().then(() => (window.location.hash = '#/'))}>Sign out</button>
-            </>
+            <a className="btn-dark" href="#/app" style={{ textDecoration: 'none' }}>Open the app <Ico.chevron /></a>
           ) : (
             <>
               <a className="btn-light" href="#/signin" style={{ textDecoration: 'none' }}>Sign in</a>
@@ -89,21 +78,51 @@ export default function App() {
           {section === 'signin' && <SignIn mode="signin" />}
           {section === 'signup' && <SignIn mode="signup" />}
           {section === 'screener' && <Screener org={null} />}
-          {section === 'portfolio' && <Portfolio />}
-          {section === 'loans' && sub && <LoanDetail id={sub} />}
-          {section === 'app' && (
-            app.loading ? <p className="subtitle">Loading…</p>
-            : !authed ? null
-            : !app.org ? <Onboarding app={app} />
-            : appTab === 'deals' && subId ? <DealPage org={app.org} dealId={subId} />
-            : appTab === 'deals' ? <Deals org={app.org} />
-            : appTab === 'loans' && subId ? <LoanPage org={app.org} loanId={subId} />
-            : appTab === 'loans' ? <Loans org={app.org} />
-            : appTab === 'screener' ? <Screener org={app.org} />
-            : <Dashboard org={app.org} />
-          )}
+        </div>
+        <DialogHost />
+      </div>
+    )
+  }
+
+  // ——— The app: sidebar shell ———
+  const activeKey = PARENT[sub] ?? sub ?? ''
+  const body =
+    app.loading ? null
+    : !authed ? null
+    : !app.org ? <Onboarding app={app} />
+    : sub === 'deals' && subId ? <DealPage org={app.org} dealId={subId} initialTab={sub2} />
+    : sub === 'pipeline' || sub === 'deals' ? <Deals org={app.org} />
+    : sub === 'loans' && subId ? <LoanPage org={app.org} loanId={subId} initialTab={sub2} />
+    : sub === 'portfolio' || sub === 'loans' ? <Loans org={app.org} />
+    : sub === 'borrowers' && subId ? <BorrowerPage org={app.org} customerId={subId} />
+    : sub === 'borrowers' ? <Borrowers org={app.org} />
+    : sub === 'screener' ? <Screener org={app.org} />
+    : sub === 'operations' ? <Operations org={app.org} />
+    : <Today org={app.org} />
+
+  return (
+    <div className="shell">
+      <nav className="side" aria-label="Main">
+        <a className="side-logo" href="#/app"><Ico.logo /> <span>CRE Screener</span></a>
+        {NAV.map(n => {
+          const I = n.icon
+          return <a key={n.href} href={n.href} className={activeKey === n.key ? 'on' : ''}><I /> {n.label}</a>
+        })}
+        <div className="side-foot">
+          <div className="small" style={{ color: 'inherit' }}>{app.org?.name}</div>
+          <div className="small" style={{ opacity: .7, marginBottom: 8 }}>{app.session?.user.email}</div>
+          <button className="side-signout" onClick={() => supabase.auth.signOut().then(() => (window.location.hash = '#/'))}>Sign out</button>
+        </div>
+      </nav>
+      <div className="main">
+        <header className="appbar">
+          {authed && app.org && <Search />}
+        </header>
+        <div className="page">
+          {app.loading ? <p className="subtitle">Loading…</p> : body}
         </div>
       </div>
-    </>
+      <DialogHost />
+    </div>
   )
 }

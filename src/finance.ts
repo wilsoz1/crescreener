@@ -7,6 +7,7 @@ export type Deal = {
   rating: number | null; rating_factors: Record<string, number>; rating_override: number | null
   override_reason: string | null; override_by: string | null
   sources: { label: string; amount: number }[]; uses: { label: string; amount: number }[]
+  created_at?: string
   customers: { name: string; company: string | null } | null
 }
 export type Facility = {

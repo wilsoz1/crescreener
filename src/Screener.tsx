@@ -4,6 +4,7 @@ import { API_URL, STEPS, extractMemo } from './api'
 import { loans } from './data'
 import { Ico } from './Icons'
 import { supabase, Org } from './supabase'
+import { toast } from './dialogs'
 
 type Phase = { kind: 'idle' } | { kind: 'running'; step: number; name: string } | { kind: 'done'; deal: DealSheet } | { kind: 'error'; msg: string }
 
@@ -100,17 +101,36 @@ function Results({ deal, org, policy, setPolicy, reset }: { deal: DealSheet; org
     setAdded(true)
 
     if (org) {
-      // Signed in: the deal becomes a real loan (and customer) in the org's book.
+      // Signed in: the screened memo becomes a DEAL — the origination pipeline picks it up from here.
+      const property = g('property_name')?.text ?? 'property'
       const { data: cust } = await supabase.from('customers')
         .insert({ org_id: org.id, name: g('guarantor')?.text?.split(' (')[0] ?? sponsor, company: sponsor })
         .select().single()
-      await supabase.from('loans').insert({
-        org_id: org.id, customer_id: cust?.id ?? null,
-        loan_number: `CL-${new Date().getFullYear()}-${String(Math.floor(100 + Math.random() * 900))}`,
-        type: 'Investor CRE', stage: 'Application', amount: g('loan_amount')?.number ?? 0,
-        rate, term, ltv, dscr, collateral: `1st DOT — ${g('property_name')?.text ?? 'property'}`, rm: 'Unassigned',
-      })
-      window.location.hash = '#/app'
+      const { data: newDeal } = await supabase.from('deals').insert({
+        org_id: org.id, name: `${sponsor} — ${property}`, customer_id: cust?.id ?? null,
+        stage: 'Underwriting', purpose: `Acquisition — ${property}`, probability: 0.6,
+        rm: 'Unassigned', rating: 5, rating_factors: {},
+      }).select().single()
+      if (newDeal) {
+        await supabase.from('facilities').insert({
+          org_id: org.id, deal_id: newDeal.id, facility_type: 'Investor CRE term',
+          amount: g('loan_amount')?.number ?? 0, rate_display: rate, rate_pct: policy.rate * 100,
+          term_months: 120, amort_months: policy.amortYears * 12, io_months: 0, origination_fee_bps: 50,
+        })
+        await supabase.from('deal_parties').insert([
+          { org_id: org.id, deal_id: newDeal.id, customer_id: cust?.id ?? null, name: sponsor, role: 'Borrower' },
+          ...(g('guarantor')?.text ? [{ org_id: org.id, deal_id: newDeal.id, name: g('guarantor')!.text!.split(' (')[0], role: 'Guarantor' }] : []),
+        ])
+        if (g('purchase_price')?.number) {
+          await supabase.from('collateral').insert({
+            org_id: org.id, deal_id: newDeal.id, customer_id: cust?.id ?? null, collateral_type: 'Real estate',
+            description: property, address: g('address')?.text ?? null,
+            value: g('purchase_price')!.number!, value_source: 'Purchase price', advance_rate: 0.75,
+          })
+        }
+        toast('Deal created from the memo — continuing in the pipeline')
+        window.location.hash = `#/app/deals/${newDeal.id}`
+      }
       return
     }
 
@@ -134,7 +154,7 @@ function Results({ deal, org, policy, setPolicy, reset }: { deal: DealSheet; org
         <span className="spacer" />
         <div className="tools">
           <button className="btn-light" onClick={reset}>New memo</button>
-          <button className="btn-dark" style={{ marginLeft: 8 }} onClick={addToPipeline} disabled={added}>Add to pipeline <Ico.plus /></button>
+          <button className="btn-dark" style={{ marginLeft: 8 }} onClick={addToPipeline} disabled={added}>{org ? 'Create deal' : 'Add to pipeline'} <Ico.plus /></button>
         </div>
       </div>
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { supabase, DbLoan, Org, Payment, PaymentType, money, pastDueOf } from './supabase'
+import { supabase, DbLoan, Org, Payment, PaymentType, Deposit, CreditLine, money, pastDueOf } from './supabase'
 import { Ico } from './Icons'
 
 const PAYMENT_TYPES: PaymentType[] = ['P&I', 'I/O', 'Deferred', 'I/O Deferred', 'Construction']
@@ -24,6 +24,8 @@ const EMPTY: Filters = { drawEndBy: '', pay: new Set(), pastDueOnly: false, revi
 export default function Loans({ org }: { org: Org }) {
   const [loans, setLoans] = useState<DbLoan[]>([])
   const [payments, setPayments] = useState<Payment[]>([])
+  const [deposits, setDeposits] = useState<Deposit[]>([])
+  const [lines, setLines] = useState<CreditLine[]>([])
   const [reviewMap, setReviewMap] = useState<Record<string, Review[]>>({})
   const [loading, setLoading] = useState(true)
   const [f, setF] = useState<Filters>(EMPTY)
@@ -34,7 +36,11 @@ export default function Loans({ org }: { org: Org }) {
       supabase.from('loan_payments').select('id, loan_id, due_date, amount, status, paid_date'),
       supabase.from('covenants').select('loan_id'),
       supabase.from('ticklers').select('loan_id, requirement'),
-    ]).then(([l, p, cov, tick]) => {
+      supabase.from('deposits').select('*, customers(name, company)').order('balance', { ascending: false }),
+      supabase.from('credit_lines').select('*, customers(name, company)').order('commitment', { ascending: false }),
+    ]).then(([l, p, cov, tick, dep, cl]) => {
+      setDeposits((dep.data as Deposit[]) ?? [])
+      setLines((cl.data as CreditLine[]) ?? [])
       setLoans((l.data as DbLoan[]) ?? [])
       setPayments((p.data as Payment[]) ?? [])
       // A loan is under covenant review if it has covenants; under annual review if a tickler says so.
@@ -75,8 +81,8 @@ export default function Loans({ org }: { org: Org }) {
 
   return (
     <>
-      <h1>All loans</h1>
-      <p className="subtitle">{rows.length} of {loans.length} loans · {money(rows.reduce((s, l) => s + l.amount, 0))} shown. Click a loan to open it.</p>
+      <h1>Portfolio</h1>
+      <p className="subtitle">{rows.length} of {loans.length} loans · {money(rows.reduce((s, l) => s + l.amount, 0))} shown. Deposits and credit lines are below.</p>
 
       <div className="filters">
         <div className="f-group">
@@ -134,6 +140,40 @@ export default function Loans({ org }: { org: Org }) {
             {!rows.length && <tr><td colSpan={12} className="small">No loans match these filters.</td></tr>}
           </tbody>
         </table>
+      </div>
+
+      <div className="two-col" style={{ marginTop: 20 }}>
+        <div className="grid">
+          <div className="uw-head"><span><b>Deposits</b> <span className="small">{deposits.length} accounts · {money(deposits.reduce((s, d) => s + Number(d.balance), 0))}</span></span></div>
+          <table><tbody>
+            {deposits.map(d => (
+              <tr key={d.id}>
+                <td>{d.account_name}</td>
+                <td className="ellipsis small" title={d.customers?.company ?? undefined}>{d.customers?.company ?? '—'}</td>
+                <td><span className="pill">{d.type.replace('_', ' ')}</span></td>
+                <td className="num mono">{money(Number(d.balance))}</td>
+              </tr>
+            ))}
+          </tbody></table>
+        </div>
+        <div className="grid">
+          <div className="uw-head"><span><b>Lines of credit</b></span></div>
+          <table><tbody>
+            {lines.map(c => {
+              const u = Number(c.commitment) ? Number(c.outstanding) / Number(c.commitment) : 0
+              return (
+                <tr key={c.id}>
+                  <td><b>{c.name}</b><div className="small">{c.customers?.company}</div></td>
+                  <td className="num mono">{money(Number(c.outstanding))} / {money(Number(c.commitment))}</td>
+                  <td style={{ width: 150 }}>
+                    <div className="bar big"><span className={u > 0.8 ? 'hot' : ''} style={{ width: `${Math.min(u * 100, 100)}%` }} /></div>
+                    <span className="small mono">{(u * 100).toFixed(0)}%</span>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody></table>
+        </div>
       </div>
     </>
   )
