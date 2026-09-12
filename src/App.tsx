@@ -54,7 +54,12 @@ export default function App() {
     return <div className="pub"><SharePage token={sub} /></div>
   }
 
-  // ——— Public site (marketing / auth / demo screener) ———
+  // Marketing page carries its own (dark) chrome.
+  if (section === '') {
+    return <><Marketing authed={authed} /><DialogHost /></>
+  }
+
+  // ——— Public site (auth / demo screener) ———
   if (section !== 'app') {
     return (
       <div className="pub">
@@ -73,8 +78,7 @@ export default function App() {
             </>
           )}
         </header>
-        <div className={section === '' ? '' : 'page'}>
-          {section === '' && <Marketing authed={authed} />}
+        <div className="page">
           {section === 'signin' && <SignIn mode="signin" />}
           {section === 'signup' && <SignIn mode="signup" />}
           {section === 'screener' && <Screener org={null} />}
