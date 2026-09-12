@@ -6,8 +6,9 @@ const PAYMENT_TYPES: PaymentType[] = ['P&I', 'I/O', 'Deferred', 'I/O Deferred', 
 const stageCls: Record<string, string> = {
   Servicing: 's-green', Closing: 's-amber', Approval: 's-amber', Underwriting: 's-blue', Application: 's-gray',
 }
+// Payment structure is a fact, not an alert — always monochrome.
 const payCls: Record<PaymentType, string> = {
-  'P&I': 's-green', 'I/O': 's-blue', Deferred: 's-amber', 'I/O Deferred': 's-amber', Construction: 's-gray',
+  'P&I': 's-gray', 'I/O': 's-gray', Deferred: 's-gray', 'I/O Deferred': 's-gray', Construction: 's-gray',
 }
 export const fmtDate = (d: string | null) =>
   d ? new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'

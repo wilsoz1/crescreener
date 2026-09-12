@@ -404,3 +404,149 @@ button.tile { font: inherit; text-align: left; cursor: pointer; }
   .skel-row span { animation: shimmer 1.4s linear infinite; }
 }
 @keyframes shimmer { to { background-position: -200% 0; } }
+
+/* ═══════════════ DARK MINIMAL THEME ═══════════════
+   Re-skins the whole app via tokens + targeted overrides.
+   Principle: monochrome by default; color only where action is needed. */
+:root {
+  --ink: #f2f3f1;
+  --sub: #9ba1a8;
+  --faint: #5d636b;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-2: rgba(255, 255, 255, 0.055);
+  --bg: #0b0c0d;
+  --card: #141517;
+  --card-2: #1a1b1e;
+  --hover: rgba(255, 255, 255, 0.035);
+  --accent: #6ea0ff;
+  --green: #34d399; --green-bg: rgba(52, 211, 153, 0.11);
+  --red: #f87171;   --red-bg: rgba(248, 113, 113, 0.11);
+  --amber: #fbbf24; --amber-bg: rgba(251, 191, 36, 0.10);
+  --blue: #7dd3e0;  --blue-bg: rgba(125, 211, 224, 0.10);
+  --gray: #9ba1a8;  --gray-bg: rgba(255, 255, 255, 0.06);
+}
+body { background: var(--bg); font-family: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+/* Shell */
+.shell, .pub { background: var(--bg); }
+.side { background: var(--bg); border-right: 1px solid var(--line); }
+.side a:not(.side-logo):hover { background: var(--hover); }
+.side a.on { background: rgba(255, 255, 255, 0.06); }
+.side-foot { border-top: 1px solid var(--line); }
+.appbar { border-bottom: 1px solid var(--line); }
+.topbar { border-bottom: 1px solid var(--line); }
+.main .page { max-width: 1200px; }
+
+/* Type: calmer hierarchy */
+h1 { font-size: 22px; letter-spacing: -0.4px; }
+.subtitle { font-size: 14px; margin-bottom: 22px; }
+.stat-row b { font-size: 16px; }
+.stat-row i { font-size: 12px; }
+
+/* Tables: horizontal rules only — no grid paper */
+.grid { background: var(--card); border-color: var(--line); }
+th, td { border-right: none; }
+th {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase;
+  color: var(--faint); border-bottom: 1px solid var(--line); padding: 10px 12px;
+}
+th .h { color: var(--faint); gap: 6px; }
+th .h svg { display: none; }
+td { border-bottom: 1px solid var(--line-2); }
+tr.rowlink:hover td { background: var(--hover); }
+tr.section td { background: transparent; color: var(--faint); }
+.cell-link { color: var(--ink); font-weight: 550; }
+.cell-link:hover, .cell-link:focus-visible { color: var(--accent); }
+
+/* Section headers become quiet labels */
+.uw-head {
+  border-bottom: 1px solid var(--line);
+}
+.uw-head > span > b { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.7px; color: var(--sub); }
+.uw-head .small { font-size: 12px; color: var(--faint); }
+
+/* Status: neutral states go monochrome (icon carries the hue); only warnings fill */
+.status { background: transparent; padding: 2px 0; color: var(--sub); font-weight: 500; }
+.status.s-green svg { color: var(--green); }
+.status.s-blue svg { color: var(--blue); }
+.status.s-gray svg { color: var(--faint); }
+.status.s-red { background: var(--red-bg); color: var(--red); padding: 4px 9px; font-weight: 600; }
+.status.s-amber { background: var(--amber-bg); color: var(--amber); padding: 4px 9px; font-weight: 600; }
+.pill { background: transparent; border-color: var(--line); color: var(--sub); font-size: 12.5px; }
+
+/* Cards, tiles, filters */
+.card { background: var(--card); border-color: var(--line); }
+.tile { background: var(--card); border-color: var(--line); }
+.tile .n { font-size: 21px; }
+.tile .l { color: var(--faint); font-size: 12.5px; }
+.filters { background: transparent; border: none; padding: 0 0 4px; }
+.filters input, select.mini { background: var(--card); border-color: var(--line); color: var(--ink); color-scheme: dark; }
+.f-chip { background: transparent; border-color: var(--line); color: var(--sub); }
+.f-chip.on { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.f-chip.red.on { background: var(--red); border-color: var(--red); color: #1a0505; }
+.f-label { color: var(--faint); }
+
+/* Buttons: invert — primary is white on dark */
+.btn-dark { background: #f2f3f1; color: #0b0c0d; }
+.btn-dark:hover { background: #ffffff; }
+.btn-dark:disabled { opacity: .35; }
+.btn-light { background: transparent; border-color: var(--line); color: var(--ink); }
+.btn-light:hover { background: var(--hover); }
+.linkish { color: var(--accent); }
+
+/* Inputs everywhere */
+.auth-card input, .compose input, .compose textarea, .compose select,
+.compose-inline input, .note-form input, .share-pop input, .share-box input,
+.rule-form input, .rule-form select, .rule-form textarea, .cell-input,
+.policy input, .dlg-label input {
+  background: var(--card-2); border-color: var(--line); color: var(--ink); color-scheme: dark;
+}
+.auth-card input:focus, .compose input:focus, .compose textarea:focus, .compose select:focus {
+  outline: 2px solid rgba(110, 160, 255, 0.4); border-color: var(--accent);
+}
+.seg { background: var(--gray-bg); }
+.seg button { color: var(--sub); }
+.seg button.on { background: var(--card-2); color: var(--ink); box-shadow: none; }
+
+/* Surfaces that were light */
+.auth-card, .share-pop, .dlg, .draft-panel, .gsearch, .gsearch-pop, .drop { background: var(--card); border-color: var(--line); }
+.gsearch input { background: transparent; color: var(--ink); }
+.gsearch-pop a { color: var(--ink); border-color: var(--line-2); }
+.gsearch-pop a:hover, .gsearch-pop a:focus-visible { background: var(--hover); }
+.drop { border: 1.5px dashed var(--line); }
+.drop:hover, .drop.drag { border-color: var(--sub); background: var(--card); }
+.compose-inline, .note-form, .rule-form, .uw-head, .share-box { background: transparent; }
+.rule-form, .note-form, .compose-inline { border-color: var(--line-2); }
+.alert, .wq-row, .note, .skel-row { border-color: var(--line-2); }
+.alert-strip { background: var(--red-bg); border-color: rgba(248, 113, 113, 0.2); }
+.alert-strip.ok { background: rgba(52, 211, 153, 0.07); border-color: rgba(52, 211, 153, 0.18); }
+.demo-note { background: var(--amber-bg); border-color: rgba(251, 191, 36, 0.25); color: var(--amber); }
+.share-toast { background: var(--green-bg); border-color: rgba(52, 211, 153, 0.25); color: var(--green); }
+.tabs { background: var(--gray-bg); }
+.tabs button.on { background: var(--card-2); color: var(--ink); box-shadow: none; }
+.dlg-overlay, .draft-overlay { background: rgba(0, 0, 0, 0.6); }
+.toast { background: #f2f3f1; color: #0b0c0d; }
+.stage-dot { background: transparent; color: var(--faint); padding: 3px 6px; }
+.stage-dot.done { background: transparent; color: var(--green); }
+.stage-dot.on { background: rgba(255, 255, 255, 0.09); color: var(--ink); }
+.bar { background: rgba(255, 255, 255, 0.07); }
+.bar span { background: var(--sub); }
+.bar span.hot { background: var(--red); }
+.skel-row span { background: linear-gradient(90deg, rgba(255,255,255,.05) 25%, rgba(255,255,255,.09) 50%, rgba(255,255,255,.05) 75%); background-size: 200% 100%; }
+.detail-tabs { border-color: var(--line); }
+.detail-tabs button.on { color: var(--ink); border-bottom-color: var(--ink); }
+.tab-badge.red { background: var(--red); color: #1a0505; }
+.tab-badge.amber { background: var(--amber); color: #221600; }
+.check span, .share-doc input { border-color: var(--line); }
+.share-docs-list { border-color: var(--line-2); }
+.dot2.info { background: var(--blue); }
+.avatar { background: rgba(110, 160, 255, 0.18); color: var(--accent); }
+.kv td:first-child { color: var(--faint); }
+.src { color: var(--faint); }
+.small { color: var(--sub); }
+.crumb-row a { color: var(--faint); }
+.crumb-row a:hover { color: var(--ink); }
+.metric { border-color: var(--line-2); }
+.m-label, .m-test { color: var(--faint); }
+.metrics, .uw-head + * { background: transparent; }
+tr.ratio-row td { background: rgba(255, 255, 255, 0.02); color: var(--faint); }

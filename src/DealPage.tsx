@@ -267,7 +267,7 @@ function FacilitiesTab({ facilities, spreads }: { facilities: Facility[]; spread
                     <td className="num mono">{f.origination_fee_bps ? money((f.amount * f.origination_fee_bps) / 10000) : '—'}</td>
                   </tr>
                   {open === f.id && f.amort_months && (
-                    <tr><td colSpan={7} style={{ background: '#fafbfc' }}>
+                    <tr><td colSpan={7} style={{ background: 'var(--hover)' }}>
                       <table style={{ minWidth: 0 }}>
                         <thead><tr><th>#</th><th className="num">Payment</th><th className="num">Interest</th><th className="num">Principal</th><th className="num">Balance</th></tr></thead>
                         <tbody>
