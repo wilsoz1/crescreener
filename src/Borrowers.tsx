@@ -1,5 +1,5 @@
-// Borrowers — the relationship view that was missing: one page per practice with
-// everything the bank knows about them, and a lifecycle timeline of their loans.
+// The relationship page: everything the bank knows about one practice — cash flow,
+// loans, deposits, lines, financials, documents, outreach. Reached from Portfolio.
 import { useEffect, useState } from 'react'
 import { supabase, Org, Customer, DbLoan, Deposit, CreditLine, Spread, Attempt, Doc, Guarantor, SPREAD_LINES, money } from './supabase'
 import { CashFlowPanel } from './CashFlow'
@@ -7,55 +7,6 @@ import { fmtDate } from './Loans'
 import { Skeleton } from './dialogs'
 import { Ico } from './Icons'
 
-export default function Borrowers({ org }: { org: Org }) {
-  const [customers, setCustomers] = useState<Customer[] | null>(null)
-  const [loans, setLoans] = useState<DbLoan[]>([])
-  const [deposits, setDeposits] = useState<Deposit[]>([])
-
-  useEffect(() => {
-    Promise.all([
-      supabase.from('customers').select('*').order('company'),
-      supabase.from('loans').select('*, customers(name, company, email, phone)'),
-      supabase.from('deposits').select('*, customers(name, company)'),
-    ]).then(([c, l, d]) => {
-      setCustomers((c.data as Customer[]) ?? [])
-      setLoans((l.data as DbLoan[]) ?? [])
-      setDeposits((d.data as Deposit[]) ?? [])
-    })
-  }, [org.id])
-
-  if (!customers) return <><h1>Borrowers</h1><Skeleton rows={6} /></>
-
-  return (
-    <>
-      <h1>Borrowers</h1>
-      <p className="subtitle">Every relationship — exposure, deposits and loans in one view. Click a practice for the full picture.</p>
-      <div className="grid">
-        <table>
-          <thead><tr><th>Borrower</th><th>Contact</th><th className="num">Loan exposure</th><th className="num">Deposits</th><th className="num">Loans</th></tr></thead>
-          <tbody>
-            {customers.map(c => {
-              const custLoans = loans.filter(l => l.customer_id === c.id)
-              const exp = custLoans.reduce((s, l) => s + Number(l.current_balance ?? l.amount), 0)
-              const dep = deposits.filter(d => (d as Deposit & { customer_id?: string }).customer_id === c.id).reduce((s, d) => s + Number(d.balance), 0)
-              return (
-                <tr key={c.id} className="rowlink" onClick={() => (window.location.hash = `#/app/borrowers/${c.id}`)}>
-                  <td><a className="cell-link" href={`#/app/borrowers/${c.id}`}>{c.company ?? c.name}</a></td>
-                  <td className="small">{c.name} · {c.email ?? 'no email'}</td>
-                  <td className="num mono">{exp ? money(exp) : '—'}</td>
-                  <td className="num mono">{dep ? money(dep) : '—'}</td>
-                  <td className="num mono">{custLoans.length || '—'}</td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-    </>
-  )
-}
-
-// ——— Relationship page ———
 export function BorrowerPage({ org, customerId }: { org: Org; customerId: string }) {
   const [cust, setCust] = useState<Customer | null>(null)
   const [loans, setLoans] = useState<DbLoan[]>([])
@@ -94,7 +45,7 @@ export function BorrowerPage({ org, customerId }: { org: Org; customerId: string
   }, [customerId])
 
   if (loading) return <Skeleton rows={7} />
-  if (!cust) return <><h1>Borrower not found</h1><p className="subtitle"><a href="#/app/borrowers">← All borrowers</a></p></>
+  if (!cust) return <><h1>Borrower not found</h1><p className="subtitle"><a href="#/app/portfolio">← Portfolio</a></p></>
 
   const exposure = loans.reduce((s, l) => s + Number(l.current_balance ?? l.amount), 0)
   const depTotal = deposits.reduce((s, d) => s + Number(d.balance), 0)
@@ -111,7 +62,7 @@ export function BorrowerPage({ org, customerId }: { org: Org; customerId: string
 
   return (
     <>
-      <div className="crumb-row"><a href="#/app/borrowers">← Borrowers</a></div>
+      <div className="crumb-row"><a href="#/app/portfolio">← Portfolio</a></div>
       <div className="viewbar" style={{ marginBottom: 4, alignItems: 'flex-start' }}>
         <div>
           <h1 style={{ marginBottom: 2 }}>{cust.company ?? cust.name}</h1>

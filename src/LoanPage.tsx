@@ -116,7 +116,12 @@ export default function LoanPage({ org, loanId, initialTab }: { org: Org; loanId
       <div className="viewbar" style={{ marginBottom: 4, alignItems: 'flex-start' }}>
         <div>
           <h1 style={{ marginBottom: 2 }}>{loan.loan_number}</h1>
-          <p className="subtitle" style={{ marginBottom: 10 }}>{loan.customers?.company} · {loan.type} · {loan.stage === 'Servicing' ? 'Active' : loan.stage}</p>
+          <p className="subtitle" style={{ marginBottom: 10 }}>
+            {loan.customer_id
+              ? <a className="cell-link" href={`#/app/borrowers/${loan.customer_id}`} title="Open the relationship — cash flow, deposits, documents">{loan.customers?.company}</a>
+              : loan.customers?.company}
+            {' · '}{loan.type} · {loan.stage === 'Servicing' ? 'Active' : loan.stage}
+          </p>
           <div className="stat-row">
             <span><b>{loan.current_balance === null ? money(loan.amount) : money(loan.current_balance)}</b><i>{loan.current_balance === null ? 'commitment' : `balance of ${money(loan.amount)}`}</i></span>
             <span><b>{loan.next_payment_amount ? money(loan.next_payment_amount) : '—'}</b><i>{loan.next_payment_date ? `next pmt · ${fmtDate(loan.next_payment_date)}` : 'next payment'}</i></span>

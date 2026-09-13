@@ -1,5 +1,9 @@
+// Portfolio — the whole book, organized by relationship. Each borrower is a group:
+// one header row with the relationship facts (exposure, deposits, utilization, global
+// DSCR, past due) that opens the full relationship page, and their loans beneath it.
 import { useEffect, useMemo, useState } from 'react'
-import { supabase, DbLoan, Org, Payment, PaymentType, Deposit, CreditLine, money, pastDueOf } from './supabase'
+import { supabase, DbLoan, Org, Customer, Payment, PaymentType, Deposit, CreditLine, Spread, Guarantor, money, pastDueOf } from './supabase'
+import { latestGlobalDSCR, CFScenarioData } from './CashFlow'
 import { ModifyButton } from './Modify'
 import { Ico } from './Icons'
 
@@ -22,33 +26,46 @@ type Filters = {
   reviews: Set<Review>
 }
 const EMPTY: Filters = { drawEndBy: '', pay: new Set(), pastDueOnly: false, reviews: new Set() }
+type BaseScenario = { id: string; customer_id: string; name: string; data: CFScenarioData }
 
 export default function Loans({ org }: { org: Org }) {
+  const [customers, setCustomers] = useState<Customer[]>([])
   const [loans, setLoans] = useState<DbLoan[]>([])
   const [payments, setPayments] = useState<Payment[]>([])
-  const [deposits, setDeposits] = useState<Deposit[]>([])
-  const [lines, setLines] = useState<CreditLine[]>([])
+  const [deposits, setDeposits] = useState<(Deposit & { customer_id?: string | null })[]>([])
+  const [lines, setLines] = useState<(CreditLine & { customer_id?: string | null })[]>([])
   const [reviewMap, setReviewMap] = useState<Record<string, Review[]>>({})
+  const [scenarios, setScenarios] = useState<BaseScenario[]>([])
+  const [spreads, setSpreads] = useState<Spread[]>([])
+  const [guarantors, setGuarantors] = useState<(Guarantor & { loans: { customer_id: string | null } | null })[]>([])
   const [loading, setLoading] = useState(true)
   const [f, setF] = useState<Filters>(EMPTY)
 
   useEffect(() => {
     Promise.all([
+      supabase.from('customers').select('*'),
       supabase.from('loans').select('*, customers(name, company, email, phone)').order('amount', { ascending: false }),
       supabase.from('loan_payments').select('id, loan_id, due_date, amount, status, paid_date'),
       supabase.from('covenants').select('loan_id'),
       supabase.from('ticklers').select('loan_id, requirement'),
-      supabase.from('deposits').select('*, customers(name, company)').order('balance', { ascending: false }),
-      supabase.from('credit_lines').select('*, customers(name, company)').order('commitment', { ascending: false }),
-    ]).then(([l, p, cov, tick, dep, cl]) => {
-      setDeposits((dep.data as Deposit[]) ?? [])
-      setLines((cl.data as CreditLine[]) ?? [])
+      supabase.from('deposits').select('*, customers(name, company)'),
+      supabase.from('credit_lines').select('*, customers(name, company)'),
+      supabase.from('cash_flow_scenarios').select('id, customer_id, name, data').eq('is_base', true),
+      supabase.from('financial_spreads').select('*').eq('status', 'reviewed'),
+      supabase.from('guarantors').select('*, loans(customer_id)'),
+    ]).then(([c, l, p, cov, tick, dep, cl, cfs, sp, g]) => {
+      setCustomers((c.data as Customer[]) ?? [])
       setLoans((l.data as DbLoan[]) ?? [])
       setPayments((p.data as Payment[]) ?? [])
+      setDeposits((dep.data as (Deposit & { customer_id?: string | null })[]) ?? [])
+      setLines((cl.data as (CreditLine & { customer_id?: string | null })[]) ?? [])
+      setScenarios((cfs.data as BaseScenario[]) ?? [])
+      setSpreads((sp.data as Spread[]) ?? [])
+      setGuarantors((g.data as unknown as (Guarantor & { loans: { customer_id: string | null } | null })[]) ?? [])
       // A loan is under covenant review if it has covenants; under annual review if a tickler says so.
       const map: Record<string, Review[]> = {}
-      for (const c of (cov.data as { loan_id: string }[]) ?? []) {
-        if (!map[c.loan_id]?.includes('Covenant')) map[c.loan_id] = [...(map[c.loan_id] ?? []), 'Covenant']
+      for (const x of (cov.data as { loan_id: string }[]) ?? []) {
+        if (!map[x.loan_id]?.includes('Covenant')) map[x.loan_id] = [...(map[x.loan_id] ?? []), 'Covenant']
       }
       for (const t of (tick.data as { loan_id: string; requirement: string }[]) ?? []) {
         if (/annual review/i.test(t.requirement) && !map[t.loan_id]?.includes('Annual review'))
@@ -59,13 +76,45 @@ export default function Loans({ org }: { org: Org }) {
     })
   }, [org.id])
 
-  const rows = useMemo(() => loans.filter(l => {
+  const matches = (l: DbLoan) => {
     if (f.drawEndBy && (!l.draw_period_end || l.draw_period_end > f.drawEndBy)) return false
     if (f.pay.size && !f.pay.has(l.payment_type)) return false
     if (f.pastDueOnly && !pastDueOf(payments, l.id)) return false
     if (f.reviews.size && ![...f.reviews].every(r => reviewMap[l.id]?.includes(r))) return false
     return true
-  }), [loans, payments, reviewMap, f])
+  }
+
+  // One group per relationship, biggest exposure first; filters hide loans, and
+  // relationships with nothing left to show.
+  const groups = useMemo(() => {
+    const byId = new Map(customers.map(c => [c.id, c]))
+    const grouped = new Map<string, DbLoan[]>()
+    for (const l of loans) {
+      const key = l.customer_id ?? 'none'
+      grouped.set(key, [...(grouped.get(key) ?? []), l])
+    }
+    return [...grouped.entries()]
+      .map(([cid, all]) => {
+        const cust = byId.get(cid) ?? null
+        const shown = all.filter(matches)
+        const exposure = all.reduce((s, l) => s + Number(l.current_balance ?? l.amount), 0)
+        const dep = deposits.filter(d => d.customer_id === cid).reduce((s, d) => s + Number(d.balance), 0)
+        const custLines = lines.filter(x => x.customer_id === cid)
+        const commit = custLines.reduce((s, x) => s + Number(x.commitment), 0)
+        const drawn = custLines.reduce((s, x) => s + Number(x.outstanding), 0)
+        const pastDue = all.reduce((s, l) => s + (pastDueOf(payments, l.id)?.amount ?? 0), 0)
+        const base = scenarios.find(s => s.customer_id === cid)
+        const dscr = base ? latestGlobalDSCR(
+          base.data ?? {},
+          spreads.filter(s => s.customer_id === cid),
+          guarantors.filter(g => g.loans?.customer_id === cid),
+          all,
+        ) : null
+        return { cid, cust, all, shown, exposure, dep, commit, drawn, pastDue, dscr }
+      })
+      .filter(g => g.shown.length > 0)
+      .sort((a, b) => b.exposure - a.exposure)
+  }, [customers, loans, deposits, lines, payments, scenarios, spreads, guarantors, reviewMap, f])
 
   const togglePay = (p: PaymentType) => {
     const pay = new Set(f.pay)
@@ -78,13 +127,17 @@ export default function Loans({ org }: { org: Org }) {
     setF({ ...f, reviews })
   }
   const active = f.drawEndBy || f.pay.size > 0 || f.pastDueOnly || f.reviews.size > 0
+  const shownLoans = groups.flatMap(g => g.shown)
 
-  if (loading) return <p className="subtitle">Loading loans…</p>
+  if (loading) return <p className="subtitle">Loading portfolio…</p>
 
   return (
     <>
       <h1>Portfolio</h1>
-      <p className="subtitle">{rows.length} of {loans.length} loans · {money(rows.reduce((s, l) => s + l.amount, 0))} shown. Deposits and credit lines are below.</p>
+      <p className="subtitle">
+        {groups.length} relationship{groups.length === 1 ? '' : 's'} · {shownLoans.length} of {loans.length} loans · {money(shownLoans.reduce((s, l) => s + Number(l.amount), 0))} shown.
+        Click a practice for its full picture — cash flow, deposits, documents, outreach.
+      </p>
 
       <div className="filters">
         <div className="f-group">
@@ -112,72 +165,79 @@ export default function Loans({ org }: { org: Org }) {
       <div className="grid">
         <table>
           <thead><tr>
-            <th>Loan</th><th>Borrower</th><th>Type</th><th>Stage</th><th>Payment</th><th>Reviews</th><th>Past due</th>
+            <th>Loan</th><th>Type</th><th>Stage</th><th>Payment</th><th>Reviews</th><th>Past due</th>
             <th className="num">Amount</th><th>Rate</th><th>Maturity</th><th>Draw period end</th><th>RM</th><th></th>
           </tr></thead>
           <tbody>
-            {rows.map(l => {
-              const pd = pastDueOf(payments, l.id)
-              return (
-                <tr key={l.id} className="rowlink" onClick={() => (window.location.hash = `#/app/loans/${l.id}`)}>
-                  <td className="mono"><a className="cell-link" href={`#/app/loans/${l.id}`}>{l.loan_number}</a></td>
-                  <td className="ellipsis" title={l.customers?.company ?? undefined}>{l.customers?.company ?? '—'}</td>
-                  <td>{l.type}</td>
-                  <td><span className={`status ${stageCls[l.stage] ?? 's-gray'}`}>{l.stage === 'Servicing' ? 'Active' : l.stage}</span></td>
-                  <td><span className={`status ${payCls[l.payment_type]}`}>{l.payment_type}</span></td>
-                  <td>{reviewMap[l.id]?.length
-                    ? reviewMap[l.id].map(r => <span key={r} className="pill" style={{ marginRight: 4 }}>{r}</span>)
-                    : <span className="small">—</span>}</td>
-                  <td>{pd ? <span className="status s-red"><Ico.x /> {pd.days}d · {money(pd.amount)}</span>
-                    : payments.some(p => p.loan_id === l.id) ? <span className="status s-green"><Ico.check /> Current</span>
-                    : <span className="small">—</span>}</td>
-                  <td className="num mono">{money(l.amount)}</td>
-                  <td className="mono">{l.rate ?? '—'}</td>
-                  <td>{fmtDate(l.maturity)}</td>
-                  <td>{fmtDate(l.draw_period_end)}</td>
-                  <td>{l.rm ?? '—'}</td>
-                  <td onClick={e => e.stopPropagation()}><ModifyButton org={org} loan={l} small /></td>
-                </tr>
-              )
-            })}
-            {!rows.length && <tr><td colSpan={13} className="small">No loans match these filters.</td></tr>}
+            {groups.map(g => (
+              <GroupRows key={g.cid} g={g} org={org} payments={payments} reviewMap={reviewMap} />
+            ))}
+            {!groups.length && <tr><td colSpan={12} className="small">No loans match these filters.</td></tr>}
           </tbody>
         </table>
       </div>
+    </>
+  )
+}
 
-      <div className="two-col" style={{ marginTop: 20 }}>
-        <div className="grid">
-          <div className="uw-head"><span><b>Deposits</b> <span className="small">{deposits.length} accounts · {money(deposits.reduce((s, d) => s + Number(d.balance), 0))}</span></span></div>
-          <table><tbody>
-            {deposits.map(d => (
-              <tr key={d.id}>
-                <td>{d.account_name}</td>
-                <td className="ellipsis small" title={d.customers?.company ?? undefined}>{d.customers?.company ?? '—'}</td>
-                <td><span className="pill">{d.type.replace('_', ' ')}</span></td>
-                <td className="num mono">{money(Number(d.balance))}</td>
-              </tr>
-            ))}
-          </tbody></table>
-        </div>
-        <div className="grid">
-          <div className="uw-head"><span><b>Lines of credit</b></span></div>
-          <table><tbody>
-            {lines.map(c => {
-              const u = Number(c.commitment) ? Number(c.outstanding) / Number(c.commitment) : 0
-              return (
-                <tr key={c.id}>
-                  <td><b>{c.name}</b><div className="small">{c.customers?.company}</div></td>
-                  <td className="num mono">{money(Number(c.outstanding))} / {money(Number(c.commitment))}</td>
-                  <td style={{ width: 150 }}>
-                    <div className="bar big"><span className={u > 0.8 ? 'hot' : ''} style={{ width: `${Math.min(u * 100, 100)}%` }} /></div>
-                    <span className="small mono">{(u * 100).toFixed(0)}%</span>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody></table>
-        </div>
-      </div>
+function GroupRows({ g, org, payments, reviewMap }: {
+  g: {
+    cid: string; cust: Customer | null; shown: DbLoan[]; all: DbLoan[]
+    exposure: number; dep: number; commit: number; drawn: number; pastDue: number
+    dscr: { dscr: number; period: string } | null
+  }
+  org: Org
+  payments: Payment[]
+  reviewMap: Record<string, ('Covenant' | 'Annual review')[]>
+}) {
+  const href = `#/app/borrowers/${g.cid}`
+  const name = g.cust?.company ?? g.cust?.name ?? 'No borrower on file'
+  return (
+    <>
+      <tr className="rowlink" onClick={() => g.cust && (window.location.hash = href)}>
+        <td colSpan={12} style={{ padding: '14px 14px 10px' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+            <b style={{ fontSize: 14.5 }}>
+              {g.cust ? <a className="cell-link" href={href}>{name}</a> : name}
+            </b>
+            <span className="small">{g.all.length} loan{g.all.length === 1 ? '' : 's'} · {money(g.exposure)} exposure</span>
+            {g.dep > 0 && <span className="small">{money(g.dep)} deposits</span>}
+            {g.commit > 0 && <span className="small">{Math.round((g.drawn / g.commit) * 100)}% line drawn</span>}
+            {g.dscr && (
+              <span className={`status ${g.dscr.dscr >= 1.25 ? 's-green' : g.dscr.dscr >= 1.1 ? 's-amber' : 's-red'}`}
+                title={`Global DSCR · base scenario · ${g.dscr.period}`}>
+                DSCR {g.dscr.dscr.toFixed(2)}x
+              </span>
+            )}
+            {g.pastDue > 0 && <span className="status s-red"><Ico.x /> {money(g.pastDue)} past due</span>}
+            <span className="spacer" />
+            {g.cust && <a className="linkish small" href={href} onClick={e => e.stopPropagation()}>Cash flow & relationship →</a>}
+          </span>
+        </td>
+      </tr>
+      {g.shown.map(l => {
+        const pd = pastDueOf(payments, l.id)
+        return (
+          <tr key={l.id} className="rowlink" onClick={() => (window.location.hash = `#/app/loans/${l.id}`)}>
+            <td className="mono"><a className="cell-link" href={`#/app/loans/${l.id}`}>{l.loan_number}</a></td>
+            <td>{l.type}</td>
+            <td><span className={`status ${stageCls[l.stage] ?? 's-gray'}`}>{l.stage === 'Servicing' ? 'Active' : l.stage}</span></td>
+            <td><span className={`status ${payCls[l.payment_type]}`}>{l.payment_type}</span></td>
+            <td>{reviewMap[l.id]?.length
+              ? reviewMap[l.id].map(r => <span key={r} className="pill" style={{ marginRight: 4 }}>{r}</span>)
+              : <span className="small">—</span>}</td>
+            <td>{pd ? <span className="status s-red"><Ico.x /> {pd.days}d · {money(pd.amount)}</span>
+              : payments.some(p => p.loan_id === l.id) ? <span className="status s-green"><Ico.check /> Current</span>
+              : <span className="small">—</span>}</td>
+            <td className="num mono">{money(l.amount)}</td>
+            <td className="mono">{l.rate ?? '—'}</td>
+            <td>{fmtDate(l.maturity)}</td>
+            <td>{fmtDate(l.draw_period_end)}</td>
+            <td>{l.rm ?? '—'}</td>
+            <td onClick={e => e.stopPropagation()}><ModifyButton org={org} loan={l} small /></td>
+          </tr>
+        )
+      })}
     </>
   )
 }
