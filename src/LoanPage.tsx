@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { supabase, DbLoan, Doc, Org, ShareLink, Attempt, Payment, DbCovenant, DbTickler, Guarantor, Note, Spread, SPREAD_LINES, money, daysLate, spreadFromDocument, autoTestCovenants } from './supabase'
+import { supabase, DbLoan, Doc, Org, ShareLink, Attempt, Payment, DbCovenant, DbTickler, Guarantor, Note, Spread, Deposit, CreditLine, SPREAD_LINES, money, daysLate, spreadFromDocument, autoTestCovenants } from './supabase'
+import { CashFlowPanel } from './CashFlow'
 import { fmtDate } from './Loans'
 import { classifyType } from './Documents'
 import { API_URL, aiSpread, aiProcessDocument } from './api'
@@ -10,7 +11,7 @@ import { Ico } from './Icons'
 
 const shareUrl = (token: string) => `${window.location.origin}/#/share/${token}`
 const covCls = { Pass: 's-green', Near: 's-amber', Fail: 's-red' } as const
-const TABS = ['Overview', 'Payments', 'Spreads', 'Compliance', 'Structure', 'Documents', 'Activity'] as const
+const TABS = ['Overview', 'Borrower', 'Payments', 'Spreads', 'Compliance', 'Structure', 'Documents', 'Activity'] as const
 type Tab = (typeof TABS)[number]
 
 const payStatus = (p: Payment) => {
@@ -40,6 +41,12 @@ export default function LoanPage({ org, loanId, initialTab }: { org: Org; loanId
   const [guarantors, setGuarantors] = useState<Guarantor[]>([])
   const [notes, setNotes] = useState<Note[]>([])
   const [spreads, setSpreads] = useState<Spread[]>([])
+  // Relationship-level data for the Borrower tab: every loan the customer has,
+  // their deposits and lines, and all guarantors across the relationship.
+  const [relLoans, setRelLoans] = useState<DbLoan[]>([])
+  const [relGuarantors, setRelGuarantors] = useState<Guarantor[]>([])
+  const [deposits, setDeposits] = useState<Deposit[]>([])
+  const [lines, setLines] = useState<CreditLine[]>([])
   const [loading, setLoading] = useState(true)
   const [tab, setTabState] = useState<Tab>((TABS as readonly string[]).includes(initialTab ?? '') ? (initialTab as Tab) : 'Overview')
   const setTab = (t: Tab) => {
@@ -51,9 +58,23 @@ export default function LoanPage({ org, loanId, initialTab }: { org: Org; loanId
     setLoan((l as DbLoan) ?? null)
     let freshSpreads: Spread[] = []
     if (l?.customer_id) {
-      const { data } = await supabase.from('financial_spreads').select('*').eq('customer_id', l.customer_id).order('period')
-      freshSpreads = (data as Spread[]) ?? []
+      const [sp, rl, dp, cl] = await Promise.all([
+        supabase.from('financial_spreads').select('*').eq('customer_id', l.customer_id).order('period'),
+        supabase.from('loans').select('*, customers(name, company, email, phone)').eq('customer_id', l.customer_id).order('amount', { ascending: false }),
+        supabase.from('deposits').select('*, customers(name, company)').eq('customer_id', l.customer_id),
+        supabase.from('credit_lines').select('*, customers(name, company)').eq('customer_id', l.customer_id),
+      ])
+      freshSpreads = (sp.data as Spread[]) ?? []
       setSpreads(freshSpreads)
+      const rls = (rl.data as DbLoan[]) ?? []
+      setRelLoans(rls)
+      setDeposits((dp.data as Deposit[]) ?? []); setLines((cl.data as CreditLine[]) ?? [])
+      if (rls.length) {
+        const { data: rg } = await supabase.from('guarantors').select('*').in('loan_id', rls.map(x => x.id))
+        // The same person often guarantees several loans — one row per person.
+        const seen = new Set<string>()
+        setRelGuarantors(((rg as Guarantor[]) ?? []).filter(x => !seen.has(x.name) && !!seen.add(x.name)))
+      }
     }
     const [d, s, pay, cov, tick, g, n, o] = await Promise.all([
       supabase.from('documents').select('*, loans(loan_number), customers(company)').eq('loan_id', loanId).order('created_at', { ascending: false }),
@@ -118,7 +139,7 @@ export default function LoanPage({ org, loanId, initialTab }: { org: Org; loanId
           <h1 style={{ marginBottom: 2 }}>{loan.loan_number}</h1>
           <p className="subtitle" style={{ marginBottom: 10 }}>
             {loan.customer_id
-              ? <a className="cell-link" href={`#/app/borrowers/${loan.customer_id}`} title="Open the relationship — cash flow, deposits, documents">{loan.customers?.company}</a>
+              ? <button className="linkish" onClick={() => setTab('Borrower')} title="Borrower tab — contact, guarantors, cash flow">{loan.customers?.company}</button>
               : loan.customers?.company}
             {' · '}{loan.type} · {loan.stage === 'Servicing' ? 'Active' : loan.stage}
           </p>
@@ -167,6 +188,7 @@ export default function LoanPage({ org, loanId, initialTab }: { org: Org; loanId
       </div>
 
       {tab === 'Overview' && <Overview {...{ overdue, covFails, covNear, tickPastDue, stalePfs, docsReview, notes, outreach, payments, setTab }} />}
+      {tab === 'Borrower' && <BorrowerTab org={org} loan={loan} relLoans={relLoans} relGuarantors={relGuarantors} deposits={deposits} lines={lines} spreads={spreads} />}
       {tab === 'Payments' && <PaymentsTab loan={loan} payments={payments} />}
       {tab === 'Spreads' && <SpreadsTab loan={loan} spreads={spreads} onChange={load} />}
       {tab === 'Compliance' && <ComplianceTab covenants={covenants} ticklers={ticklers} />}
@@ -226,6 +248,82 @@ function Overview({ overdue, covFails, covNear, tickPastDue, stalePfs, docsRevie
         )) : <p className="small" style={{ padding: 14 }}>No activity yet.</p>}
       </Card>
     </div>
+  )
+}
+
+// ——— Borrower: the relationship, reached from the loan — contact, guarantors,
+// cash flow, deposits, lines, and the borrower's other loans ———
+function BorrowerTab({ org, loan, relLoans, relGuarantors, deposits, lines, spreads }: {
+  org: Org; loan: DbLoan; relLoans: DbLoan[]; relGuarantors: Guarantor[]
+  deposits: Deposit[]; lines: CreditLine[]; spreads: Spread[]
+}) {
+  if (!loan.customer_id) return <p className="small" style={{ padding: 14 }}>No borrower on file for this loan.</p>
+  const c = loan.customers
+  const exposure = relLoans.reduce((s, l) => s + Number(l.current_balance ?? l.amount), 0)
+  const depTotal = deposits.reduce((s, d) => s + Number(d.balance), 0)
+  const others = relLoans.filter(l => l.id !== loan.id)
+
+  return (
+    <>
+      <div className="two-col">
+        <Card title={c?.company ?? c?.name ?? 'Borrower'} sub="relationship across all loans">
+          <table className="kv"><tbody>
+            <tr><td>Contact</td><td>{c?.name ?? '—'}</td></tr>
+            <tr><td>Email</td><td>{c?.email ?? '—'}</td></tr>
+            <tr><td>Phone</td><td>{c?.phone ?? '—'}</td></tr>
+            <tr><td>Total exposure</td><td className="mono">{money(exposure)} <span className="small">across {relLoans.length} loan{relLoans.length === 1 ? '' : 's'}</span></td></tr>
+            <tr><td>Deposits</td><td className="mono">{depTotal ? money(depTotal) : '—'}</td></tr>
+          </tbody></table>
+        </Card>
+        <Card title="Guarantors" sub="everyone standing behind the relationship">
+          <table>
+            <tbody>
+              {relGuarantors.map(g => (
+                <tr key={g.id}>
+                  <td>{g.name}</td>
+                  <td className="small">{g.guarantee_pct ? `${g.guarantee_pct}% ` : ''}{g.guarantee_type ?? ''}</td>
+                  <td className="small">PFS {fmtDate(g.pfs_date)}{g.pfs_date && daysLate(g.pfs_date) > 365 ? ' · stale' : ''}</td>
+                  <td className="num mono">{g.net_worth ? money(Number(g.net_worth)) : '—'}</td>
+                </tr>
+              ))}
+              {!relGuarantors.length && <tr><td className="small">No guarantors on record.</td></tr>}
+            </tbody>
+          </table>
+        </Card>
+      </div>
+
+      <CashFlowPanel org={org} customerId={loan.customer_id} guarantors={relGuarantors} spreads={spreads} loans={relLoans} />
+
+      <div className="two-col">
+        <Card title="Other loans" sub={others.length ? 'same borrower' : undefined}>
+          <table><tbody>
+            {others.map(l => (
+              <tr key={l.id}>
+                <td className="mono"><a className="cell-link" href={`#/app/loans/${l.id}`}>{l.loan_number}</a></td>
+                <td className="small">{l.type}</td>
+                <td className="num mono">{money(Number(l.current_balance ?? l.amount))}</td>
+                <td className="small">mat. {fmtDate(l.maturity)}</td>
+              </tr>
+            ))}
+            {!others.length && <tr><td className="small">This is the borrower's only loan.</td></tr>}
+          </tbody></table>
+        </Card>
+        <div>
+          <Card title="Deposits">
+            <table><tbody>
+              {deposits.map(d => <tr key={d.id}><td>{d.account_name}</td><td><span className="pill">{d.type.replace('_', ' ')}</span></td><td className="num mono">{money(Number(d.balance))}</td></tr>)}
+              {!deposits.length && <tr><td className="small">None.</td></tr>}
+            </tbody></table>
+          </Card>
+          <Card title="Credit lines">
+            <table><tbody>
+              {lines.map(x => <tr key={x.id}><td>{x.name}</td><td className="num mono">{money(Number(x.outstanding))} / {money(Number(x.commitment))}</td></tr>)}
+              {!lines.length && <tr><td className="small">None.</td></tr>}
+            </tbody></table>
+          </Card>
+        </div>
+      </div>
+    </>
   )
 }
 

@@ -26,7 +26,7 @@ export default function Search() {
         supabase.from('customers').select('id, name, company, email').or(`name.ilike.${like},company.ilike.${like},email.ilike.${like}`).limit(5),
       ])
       const custLoans = customers.data?.length
-        ? await supabase.from('loans').select('id, loan_number, type, customers(company)').in('customer_id', customers.data.map(c => c.id)).limit(5)
+        ? await supabase.from('loans').select('id, loan_number, type, customer_id, customers(company)').in('customer_id', customers.data.map(c => c.id)).order('amount', { ascending: false }).limit(5)
         : { data: [] }
       const loanHits = [...(loans.data ?? []), ...(custLoans.data ?? [])]
       const seen = new Set<string>()
@@ -34,7 +34,12 @@ export default function Search() {
         ...loanHits.filter(l => !seen.has(l.id) && seen.add(l.id)).map(l => ({
           kind: 'Loan' as const, label: l.loan_number, sub: `${(l as { customers?: { company?: string } }).customers?.company ?? ''} · ${l.type}`, href: `#/app/loans/${l.id}`,
         })),
-        ...(customers.data ?? []).map(c => ({ kind: 'Customer' as const, label: c.company ?? c.name, sub: c.name, href: `#/app/borrowers/${c.id}` })),
+        // A customer hit lands on their largest loan's Borrower tab — the loan
+        // number is the address for everything.
+        ...(customers.data ?? []).flatMap(c => {
+          const l = (custLoans.data ?? []).find(x => (x as { customer_id?: string }).customer_id === c.id)
+          return l ? [{ kind: 'Customer' as const, label: c.company ?? c.name, sub: c.name, href: `#/app/loans/${l.id}/Borrower` }] : []
+        }),
       ].slice(0, 9))
       setOpen(true)
     }, 250)

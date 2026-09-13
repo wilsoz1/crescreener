@@ -37,6 +37,10 @@ export default function Today({ org }: { org: Org }) {
       const loans = (ln.data as unknown as (DbLoan & { customers: { company: string | null } | null })[]) ?? []
       const payments = (pay.data as Payment[]) ?? []
       const out: Item[] = []
+      // Everything routes through a loan number — customer-level items deep-link
+      // into that customer's largest loan.
+      const loanFor = (customerId: string | null) =>
+        loans.filter(l => l.customer_id === customerId).sort((a, b) => Number(b.amount) - Number(a.amount))[0] ?? null
 
       for (const l of loans) {
         const pd = pastDueOf(payments, l.id)
@@ -50,7 +54,8 @@ export default function Today({ org }: { org: Org }) {
           out.push({ sev: 1, chip: 'reporting', text: `${t.requirement} past due ${daysLate(t.due_date)}d on ${t.loans?.loan_number}`, who: t.responsible, action: 'Open', href: `#/app/loans/${t.loan_id}/Compliance` })
       }
       for (const s of (drafts.data as unknown as { id: string; period: string; customer_id: string; customers: { company: string | null } | null }[]) ?? []) {
-        out.push({ sev: 2, chip: 'spread', text: `Draft spread awaiting review: ${s.customers?.company} · ${s.period}`, action: 'Review', href: `#/app/borrowers/${s.customer_id}` })
+        const l = loanFor(s.customer_id)
+        if (l) out.push({ sev: 2, chip: 'spread', text: `Draft spread awaiting review: ${s.customers?.company} · ${s.period}`, action: 'Review', href: `#/app/loans/${l.id}/Spreads` })
       }
       // Global DSCR watch: the relationship cash flow (base scenario) vs. live debt service.
       const allSpreads = (reviewed.data as Spread[]) ?? []
@@ -62,10 +67,11 @@ export default function Today({ org }: { org: Org }) {
           allGuar.filter(g => g.loans?.customer_id === cf.customer_id),
           loans.filter(l => l.customer_id === cf.customer_id),
         )
-        if (r && r.dscr < 1.2) out.push({
+        const target = loanFor(cf.customer_id)
+        if (r && r.dscr < 1.2 && target) out.push({
           sev: r.dscr < 1 ? 0 : 1, chip: 'cash flow',
           text: `Global DSCR ${r.dscr.toFixed(2)}x on ${cf.customers?.company} (${cf.name} · ${r.period})`,
-          action: 'Open cash flow', href: `#/app/borrowers/${cf.customer_id}`,
+          action: 'Open cash flow', href: `#/app/loans/${target.id}/Borrower`,
         })
       }
       out.sort((a, b) => a.sev - b.sev)

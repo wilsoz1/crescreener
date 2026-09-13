@@ -4,7 +4,6 @@ import Screener from './Screener'
 import Today from './Today'
 import Loans from './Loans'
 import LoanPage from './LoanPage'
-import { BorrowerPage } from './Borrowers'
 import Search from './Search'
 import SharePage from './SharePage'
 import { SignIn, Onboarding } from './Auth'
@@ -28,8 +27,8 @@ const NAV = [
   { href: '#/app/portfolio', key: 'portfolio', icon: Ico.doc, label: 'Portfolio' },
   { href: '#/app/screener', key: 'screener', icon: Ico.search, label: 'Screener' },
 ]
-// Detail routes highlight their parent section; borrower pages live under Portfolio.
-const PARENT: Record<string, string> = { loans: 'portfolio', borrowers: 'portfolio' }
+// Detail routes highlight their parent section.
+const PARENT: Record<string, string> = { loans: 'portfolio' }
 
 export default function App() {
   const hash = useHash()
@@ -89,7 +88,6 @@ export default function App() {
     : !authed ? null
     : !app.org ? <Onboarding app={app} />
     : sub === 'loans' && subId ? <LoanPage org={app.org} loanId={subId} initialTab={sub2} />
-    : sub === 'borrowers' && subId ? <BorrowerPage org={app.org} customerId={subId} />
     : sub === 'portfolio' || sub === 'loans' || sub === 'borrowers' ? <Loans org={app.org} />
     : sub === 'screener' ? <Screener org={app.org} />
     : <Today org={app.org} />
