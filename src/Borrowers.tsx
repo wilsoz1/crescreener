@@ -1,7 +1,8 @@
 // Borrowers — the relationship view that was missing: one page per practice with
 // everything the bank knows about them, and a lifecycle timeline of their loans.
 import { useEffect, useState } from 'react'
-import { supabase, Org, Customer, DbLoan, Deposit, CreditLine, Spread, Attempt, Doc, SPREAD_LINES, money } from './supabase'
+import { supabase, Org, Customer, DbLoan, Deposit, CreditLine, Spread, Attempt, Doc, Guarantor, SPREAD_LINES, money } from './supabase'
+import { CashFlowPanel } from './CashFlow'
 import { fmtDate } from './Loans'
 import { Skeleton } from './dialogs'
 import { Ico } from './Icons'
@@ -63,6 +64,7 @@ export function BorrowerPage({ org, customerId }: { org: Org; customerId: string
   const [spreads, setSpreads] = useState<Spread[]>([])
   const [docs, setDocs] = useState<Doc[]>([])
   const [outreach, setOutreach] = useState<Attempt[]>([])
+  const [guarantors, setGuarantors] = useState<Guarantor[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -74,12 +76,19 @@ export function BorrowerPage({ org, customerId }: { org: Org; customerId: string
       supabase.from('financial_spreads').select('*').eq('customer_id', customerId).order('period'),
       supabase.from('documents').select('*, loans(loan_number), customers(company)').eq('customer_id', customerId).order('created_at', { ascending: false }).limit(10),
       supabase.from('outreach_attempts').select('*, customers(name, company)').eq('customer_id', customerId).order('created_at', { ascending: false }).limit(8),
-    ]).then(([c, l, dp, cl, sp, dc, oa]) => {
+    ]).then(async ([c, l, dp, cl, sp, dc, oa]) => {
       setCust((c.data as Customer) ?? null)
-      setLoans((l.data as DbLoan[]) ?? [])
+      const loanRows = (l.data as DbLoan[]) ?? []
+      setLoans(loanRows)
       setDeposits((dp.data as Deposit[]) ?? []); setLines((cl.data as CreditLine[]) ?? [])
       setSpreads((sp.data as Spread[]) ?? []); setDocs((dc.data as Doc[]) ?? [])
       setOutreach((oa.data as Attempt[]) ?? [])
+      if (loanRows.length) {
+        const { data: g } = await supabase.from('guarantors').select('*').in('loan_id', loanRows.map(x => x.id))
+        // The same person often guarantees several loans — one row per person here.
+        const seen = new Set<string>()
+        setGuarantors(((g as Guarantor[]) ?? []).filter(x => !seen.has(x.name) && !!seen.add(x.name)))
+      } else setGuarantors([])
       setLoading(false)
     })
   }, [customerId])
@@ -115,7 +124,11 @@ export function BorrowerPage({ org, customerId }: { org: Org; customerId: string
         </div>
       </div>
 
-      <div className="two-col" style={{ marginTop: 18 }}>
+      <div style={{ marginTop: 18 }}>
+        <CashFlowPanel org={org} customerId={customerId} guarantors={guarantors} spreads={spreads} loans={loans} />
+      </div>
+
+      <div className="two-col">
         <div>
           <div className="grid" style={{ marginBottom: 20 }}>
             <div className="uw-head"><span><b>Relationship timeline</b> <span className="small">every origination — one thread</span></span></div>

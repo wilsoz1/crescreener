@@ -1,8 +1,9 @@
 // "Today" — the home page. One unified work queue across the whole book:
 // the app tells you your job instead of making you visit five reports.
 import { useEffect, useState } from 'react'
-import { supabase, Org, Payment, money, daysLate, pastDueOf } from './supabase'
+import { supabase, Org, Payment, Spread, Guarantor, money, daysLate, pastDueOf } from './supabase'
 import { DbLoan } from './supabase'
+import { latestGlobalDSCR, CFScenarioData } from './CashFlow'
 import { AskBar, DraftButton } from './Ai'
 import { Skeleton } from './dialogs'
 import { Ico } from './Icons'
@@ -22,14 +23,17 @@ export default function Today({ org }: { org: Org }) {
 
   useEffect(() => {
     Promise.all([
-      supabase.from('loans').select('id, loan_number, amount, current_balance, customers(company)'),
+      supabase.from('loans').select('id, loan_number, amount, current_balance, customer_id, next_payment_amount, customers(company)'),
       supabase.from('loan_payments').select('id, loan_id, due_date, amount, status, paid_date'),
       supabase.from('deposits').select('balance'),
       supabase.from('credit_lines').select('commitment, outstanding'),
       supabase.from('covenants').select('id, name, actual, status, loan_id, loans(loan_number)'),
       supabase.from('ticklers').select('id, requirement, due_date, status, responsible, loan_id, loans(loan_number)'),
       supabase.from('financial_spreads').select('id, period, customer_id, customers(company)').eq('status', 'draft'),
-    ]).then(([ln, pay, dep, loc, cov, tick, drafts]) => {
+      supabase.from('cash_flow_scenarios').select('id, customer_id, name, data, customers(company)').eq('is_base', true),
+      supabase.from('financial_spreads').select('*').eq('status', 'reviewed'),
+      supabase.from('guarantors').select('*, loans(customer_id)'),
+    ]).then(([ln, pay, dep, loc, cov, tick, drafts, cfs, reviewed, guar]) => {
       const loans = (ln.data as unknown as (DbLoan & { customers: { company: string | null } | null })[]) ?? []
       const payments = (pay.data as Payment[]) ?? []
       const out: Item[] = []
@@ -47,6 +51,22 @@ export default function Today({ org }: { org: Org }) {
       }
       for (const s of (drafts.data as unknown as { id: string; period: string; customer_id: string; customers: { company: string | null } | null }[]) ?? []) {
         out.push({ sev: 2, chip: 'spread', text: `Draft spread awaiting review: ${s.customers?.company} · ${s.period}`, action: 'Review', href: `#/app/borrowers/${s.customer_id}` })
+      }
+      // Global DSCR watch: the relationship cash flow (base scenario) vs. live debt service.
+      const allSpreads = (reviewed.data as Spread[]) ?? []
+      const allGuar = (guar.data as unknown as (Guarantor & { loans: { customer_id: string | null } | null })[]) ?? []
+      for (const cf of (cfs.data as unknown as { id: string; customer_id: string; name: string; data: CFScenarioData; customers: { company: string | null } | null }[]) ?? []) {
+        const r = latestGlobalDSCR(
+          cf.data ?? {},
+          allSpreads.filter(s => s.customer_id === cf.customer_id),
+          allGuar.filter(g => g.loans?.customer_id === cf.customer_id),
+          loans.filter(l => l.customer_id === cf.customer_id),
+        )
+        if (r && r.dscr < 1.2) out.push({
+          sev: r.dscr < 1 ? 0 : 1, chip: 'cash flow',
+          text: `Global DSCR ${r.dscr.toFixed(2)}x on ${cf.customers?.company} (${cf.name} · ${r.period})`,
+          action: 'Open cash flow', href: `#/app/borrowers/${cf.customer_id}`,
+        })
       }
       out.sort((a, b) => a.sev - b.sev)
       setItems(out)
