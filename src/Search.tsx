@@ -1,9 +1,9 @@
-// Global search: borrowers, loans and deals in one box, from anywhere in the app.
+// Global search: borrowers and loans in one box, from anywhere in the app.
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from './supabase'
 import { Ico } from './Icons'
 
-type Hit = { kind: 'Loan' | 'Deal' | 'Customer'; label: string; sub: string; href: string }
+type Hit = { kind: 'Loan' | 'Customer'; label: string; sub: string; href: string }
 
 export default function Search() {
   const [q, setQ] = useState('')
@@ -21,9 +21,8 @@ export default function Search() {
     if (q.trim().length < 2) { setHits([]); return }
     const t = setTimeout(async () => {
       const like = `%${q.trim()}%`
-      const [loans, deals, customers] = await Promise.all([
+      const [loans, customers] = await Promise.all([
         supabase.from('loans').select('id, loan_number, type, customers(company)').or(`loan_number.ilike.${like},type.ilike.${like}`).limit(5),
-        supabase.from('deals').select('id, name, stage').ilike('name', like).limit(5),
         supabase.from('customers').select('id, name, company, email').or(`name.ilike.${like},company.ilike.${like},email.ilike.${like}`).limit(5),
       ])
       const custLoans = customers.data?.length
@@ -35,8 +34,7 @@ export default function Search() {
         ...loanHits.filter(l => !seen.has(l.id) && seen.add(l.id)).map(l => ({
           kind: 'Loan' as const, label: l.loan_number, sub: `${(l as { customers?: { company?: string } }).customers?.company ?? ''} · ${l.type}`, href: `#/app/loans/${l.id}`,
         })),
-        ...(deals.data ?? []).map(d => ({ kind: 'Deal' as const, label: d.name, sub: d.stage, href: `#/app/deals/${d.id}` })),
-        ...(customers.data ?? []).map(c => ({ kind: 'Customer' as const, label: c.company ?? c.name, sub: c.name, href: `#/app/loans` })),
+        ...(customers.data ?? []).map(c => ({ kind: 'Customer' as const, label: c.company ?? c.name, sub: c.name, href: `#/app/borrowers/${c.id}` })),
       ].slice(0, 9))
       setOpen(true)
     }, 250)
@@ -46,7 +44,7 @@ export default function Search() {
   return (
     <div className="gsearch" ref={box}>
       <Ico.search />
-      <input aria-label="Search borrowers, loans and deals" placeholder="Search…" value={q}
+      <input aria-label="Search borrowers and loans" placeholder="Search…" value={q}
         onChange={e => setQ(e.target.value)} onFocus={() => q.length >= 2 && setOpen(true)} />
       {open && hits.length > 0 && (
         <div className="gsearch-pop">

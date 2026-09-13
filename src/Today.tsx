@@ -1,7 +1,7 @@
 // "Today" — the home page. One unified work queue across the whole book:
 // the app tells you your job instead of making you visit five reports.
 import { useEffect, useState } from 'react'
-import { supabase, Org, Payment, money, daysLate, pastDueOf, runRules } from './supabase'
+import { supabase, Org, Payment, money, daysLate, pastDueOf } from './supabase'
 import { DbLoan } from './supabase'
 import { AskBar, DraftButton } from './Ai'
 import { Skeleton } from './dialogs'
@@ -28,16 +28,10 @@ export default function Today({ org }: { org: Org }) {
       supabase.from('credit_lines').select('commitment, outstanding'),
       supabase.from('covenants').select('id, name, actual, status, loan_id, loans(loan_number)'),
       supabase.from('ticklers').select('id, requirement, due_date, status, responsible, loan_id, loans(loan_number)'),
-      supabase.from('documents').select('id, filename').eq('status', 'needs_review'),
       supabase.from('financial_spreads').select('id, period, customer_id, customers(company)').eq('status', 'draft'),
-      supabase.from('deal_exceptions').select('id, rule_name, actual, deal_id, deals(name)').eq('status', 'open'),
-      supabase.from('deal_approvals').select('id, role_label, deal_id, deals(name)').eq('decision', 'Pending'),
-      supabase.from('conditions').select('id, item, due_date, owner, deal_id, deals(name)').in('status', ['open', 'received']),
-      runRules(true).catch(() => ({ queued: [] })),
-    ]).then(([ln, pay, dep, loc, cov, tick, docs, drafts, ex, ap, cond, queue]) => {
+    ]).then(([ln, pay, dep, loc, cov, tick, drafts]) => {
       const loans = (ln.data as unknown as (DbLoan & { customers: { company: string | null } | null })[]) ?? []
       const payments = (pay.data as Payment[]) ?? []
-      const queued = (queue as { queued?: unknown[] }).queued ?? []
       const out: Item[] = []
 
       for (const l of loans) {
@@ -47,16 +41,6 @@ export default function Today({ org }: { org: Org }) {
       for (const c of (cov.data as unknown as { id: string; name: string; actual: string | null; status: string; loan_id: string; loans: { loan_number: string } | null }[]) ?? []) {
         if (c.status === 'Fail') out.push({ sev: 0, chip: 'covenant', text: `Covenant failing on ${c.loans?.loan_number}: ${c.name} (${c.actual ?? ''})`, action: 'Review', href: `#/app/loans/${c.loan_id}/Compliance` })
       }
-      for (const e of (ex.data as unknown as { id: string; rule_name: string; actual: string; deal_id: string; deals: { name: string } | null }[]) ?? []) {
-        out.push({ sev: 0, chip: 'exception', text: `Policy exception on ${e.deals?.name}: ${e.rule_name} — ${e.actual}`, action: 'Decide', href: `#/app/deals/${e.deal_id}/Policy & Rating` })
-      }
-      for (const a of (ap.data as unknown as { id: string; role_label: string; deal_id: string; deals: { name: string } | null }[]) ?? []) {
-        out.push({ sev: 1, chip: 'approval', text: `${a.role_label} approval waiting on ${a.deals?.name}`, action: 'Review', href: `#/app/deals/${a.deal_id}/Approvals` })
-      }
-      for (const c of (cond.data as unknown as { id: string; item: string; due_date: string | null; owner: string | null; deal_id: string; deals: { name: string } | null }[]) ?? []) {
-        const late = c.due_date ? daysLate(c.due_date) : -1
-        out.push({ sev: late > 0 ? 0 : 1, chip: 'condition', text: `${c.item} (${c.deals?.name})${late > 0 ? ` — past due ${late}d` : c.due_date ? ` — due ${new Date(c.due_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}`, who: c.owner ?? undefined, action: 'Open', href: `#/app/deals/${c.deal_id}/Conditions` })
-      }
       for (const t of (tick.data as unknown as { id: string; requirement: string; due_date: string; status: string; responsible: string; loan_id: string; loans: { loan_number: string } | null }[]) ?? []) {
         if ((t.status === 'open' || t.status === 'requested') && daysLate(t.due_date) > 0)
           out.push({ sev: 1, chip: 'reporting', text: `${t.requirement} past due ${daysLate(t.due_date)}d on ${t.loans?.loan_number}`, who: t.responsible, action: 'Open', href: `#/app/loans/${t.loan_id}/Compliance` })
@@ -64,11 +48,6 @@ export default function Today({ org }: { org: Org }) {
       for (const s of (drafts.data as unknown as { id: string; period: string; customer_id: string; customers: { company: string | null } | null }[]) ?? []) {
         out.push({ sev: 2, chip: 'spread', text: `Draft spread awaiting review: ${s.customers?.company} · ${s.period}`, action: 'Review', href: `#/app/borrowers/${s.customer_id}` })
       }
-      for (const d of (docs.data as { id: string; filename: string }[]) ?? []) {
-        out.push({ sev: 2, chip: 'document', text: `Needs routing: ${d.filename}`, action: 'Route', href: '#/app/operations' })
-      }
-      if (queued.length) out.push({ sev: 1, chip: 'outreach', text: `${queued.length} delinquency message${queued.length > 1 ? 's' : ''} queued to send`, action: 'Release', href: '#/app/operations' })
-
       out.sort((a, b) => a.sev - b.sev)
       setItems(out)
 
@@ -108,7 +87,7 @@ export default function Today({ org }: { org: Org }) {
         <span className="spacer" />
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           <DraftButton kind="brief" label="Draft Monday brief" />
-          <a className="btn-dark" href="#/app/screener" style={{ textDecoration: 'none' }}>Screen a new deal <Ico.chevron /></a>
+          <a className="btn-dark" href="#/app/screener" style={{ textDecoration: 'none' }}>Screen a new loan <Ico.chevron /></a>
         </div>
       </div>
 
@@ -119,7 +98,7 @@ export default function Today({ org }: { org: Org }) {
           <div className="uw-head"><span><b>Work queue</b> <span className="small">most urgent first — everything actionable in one place</span></span></div>
           {items.length === 0 && (
             <p className="small" style={{ padding: 18 }}>
-              <Ico.check /> All clear. Payments current, covenants passing, approvals moving, documents routed.
+              <Ico.check /> All clear. Payments current, covenants passing, reporting up to date.
             </p>
           )}
           {items.map((it, i) => (

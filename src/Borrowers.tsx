@@ -1,8 +1,7 @@
-// Borrowers — the relationship view that was missing: one page per customer with
-// everything the bank knows about them, and a lifecycle timeline tying deals to loans.
+// Borrowers — the relationship view that was missing: one page per practice with
+// everything the bank knows about them, and a lifecycle timeline of their loans.
 import { useEffect, useState } from 'react'
 import { supabase, Org, Customer, DbLoan, Deposit, CreditLine, Spread, Attempt, Doc, SPREAD_LINES, money } from './supabase'
-import { Deal, Facility } from './finance'
 import { fmtDate } from './Loans'
 import { Skeleton } from './dialogs'
 import { Ico } from './Icons'
@@ -11,19 +10,16 @@ export default function Borrowers({ org }: { org: Org }) {
   const [customers, setCustomers] = useState<Customer[] | null>(null)
   const [loans, setLoans] = useState<DbLoan[]>([])
   const [deposits, setDeposits] = useState<Deposit[]>([])
-  const [deals, setDeals] = useState<Deal[]>([])
 
   useEffect(() => {
     Promise.all([
       supabase.from('customers').select('*').order('company'),
       supabase.from('loans').select('*, customers(name, company, email, phone)'),
       supabase.from('deposits').select('*, customers(name, company)'),
-      supabase.from('deals').select('*, customers(name, company)'),
-    ]).then(([c, l, d, dl]) => {
+    ]).then(([c, l, d]) => {
       setCustomers((c.data as Customer[]) ?? [])
       setLoans((l.data as DbLoan[]) ?? [])
       setDeposits((d.data as Deposit[]) ?? [])
-      setDeals((dl.data as Deal[]) ?? [])
     })
   }, [org.id])
 
@@ -32,22 +28,22 @@ export default function Borrowers({ org }: { org: Org }) {
   return (
     <>
       <h1>Borrowers</h1>
-      <p className="subtitle">Every relationship — exposure, deposits and deals in one view. Click a borrower for the full picture.</p>
+      <p className="subtitle">Every relationship — exposure, deposits and loans in one view. Click a practice for the full picture.</p>
       <div className="grid">
         <table>
-          <thead><tr><th>Borrower</th><th>Contact</th><th className="num">Loan exposure</th><th className="num">Deposits</th><th className="num">Deals in flight</th></tr></thead>
+          <thead><tr><th>Borrower</th><th>Contact</th><th className="num">Loan exposure</th><th className="num">Deposits</th><th className="num">Loans</th></tr></thead>
           <tbody>
             {customers.map(c => {
-              const exp = loans.filter(l => l.customer_id === c.id).reduce((s, l) => s + Number(l.current_balance ?? l.amount), 0)
+              const custLoans = loans.filter(l => l.customer_id === c.id)
+              const exp = custLoans.reduce((s, l) => s + Number(l.current_balance ?? l.amount), 0)
               const dep = deposits.filter(d => (d as Deposit & { customer_id?: string }).customer_id === c.id).reduce((s, d) => s + Number(d.balance), 0)
-              const inFlight = deals.filter(d => d.customer_id === c.id && !['Funded', 'Declined', 'Withdrawn'].includes(d.stage)).length
               return (
                 <tr key={c.id} className="rowlink" onClick={() => (window.location.hash = `#/app/borrowers/${c.id}`)}>
                   <td><a className="cell-link" href={`#/app/borrowers/${c.id}`}>{c.company ?? c.name}</a></td>
                   <td className="small">{c.name} · {c.email ?? 'no email'}</td>
                   <td className="num mono">{exp ? money(exp) : '—'}</td>
                   <td className="num mono">{dep ? money(dep) : '—'}</td>
-                  <td className="num mono">{inFlight || '—'}</td>
+                  <td className="num mono">{custLoans.length || '—'}</td>
                 </tr>
               )
             })}
@@ -62,8 +58,6 @@ export default function Borrowers({ org }: { org: Org }) {
 export function BorrowerPage({ org, customerId }: { org: Org; customerId: string }) {
   const [cust, setCust] = useState<Customer | null>(null)
   const [loans, setLoans] = useState<DbLoan[]>([])
-  const [deals, setDeals] = useState<Deal[]>([])
-  const [facilities, setFacilities] = useState<Facility[]>([])
   const [deposits, setDeposits] = useState<Deposit[]>([])
   const [lines, setLines] = useState<CreditLine[]>([])
   const [spreads, setSpreads] = useState<Spread[]>([])
@@ -75,21 +69,19 @@ export function BorrowerPage({ org, customerId }: { org: Org; customerId: string
     Promise.all([
       supabase.from('customers').select('*').eq('id', customerId).single(),
       supabase.from('loans').select('*, customers(name, company, email, phone)').eq('customer_id', customerId),
-      supabase.from('deals').select('*, customers(name, company)').eq('customer_id', customerId),
       supabase.from('deposits').select('*, customers(name, company)').eq('customer_id', customerId),
       supabase.from('credit_lines').select('*, customers(name, company)').eq('customer_id', customerId),
       supabase.from('financial_spreads').select('*').eq('customer_id', customerId).order('period'),
       supabase.from('documents').select('*, loans(loan_number), customers(company)').eq('customer_id', customerId).order('created_at', { ascending: false }).limit(10),
       supabase.from('outreach_attempts').select('*, customers(name, company)').eq('customer_id', customerId).order('created_at', { ascending: false }).limit(8),
-    ]).then(([c, l, dl, dp, cl, sp, dc, oa]) => {
+    ]).then(([c, l, dp, cl, sp, dc, oa]) => {
       setCust((c.data as Customer) ?? null)
-      setLoans((l.data as DbLoan[]) ?? []); setDeals((dl.data as Deal[]) ?? [])
+      setLoans((l.data as DbLoan[]) ?? [])
       setDeposits((dp.data as Deposit[]) ?? []); setLines((cl.data as CreditLine[]) ?? [])
       setSpreads((sp.data as Spread[]) ?? []); setDocs((dc.data as Doc[]) ?? [])
       setOutreach((oa.data as Attempt[]) ?? [])
       setLoading(false)
     })
-    supabase.from('facilities').select('*').then(({ data }) => setFacilities((data as Facility[]) ?? []))
   }, [customerId])
 
   if (loading) return <Skeleton rows={7} />
@@ -100,19 +92,11 @@ export function BorrowerPage({ org, customerId }: { org: Org; customerId: string
   const lineCommit = lines.reduce((s, c) => s + Number(c.commitment), 0)
   const lineDrawn = lines.reduce((s, c) => s + Number(c.outstanding), 0)
 
-  // Lifecycle timeline: deals and loans as one thread, newest first.
+  // Lifecycle timeline: originations as one thread, newest first.
   type Ev = { at: string; label: React.ReactNode }
-  const timeline: Ev[] = [
-    ...deals.map(d => ({
-      at: (d.created_at ?? '').slice(0, 10), label: <>Deal <a className="cell-link" href={`#/app/deals/${d.id}`}>{d.name}</a> — {d.stage}{d.stage === 'Funded' && facilities.filter(f => f.deal_id === d.id && f.loan_id).length > 0 && <> → booked as {facilities.filter(f => f.deal_id === d.id && f.loan_id).map((f, i) => {
-        const loan = loans.find(l => l.id === f.loan_id)
-        return loan ? <span key={f.id}>{i > 0 && ', '}<a className="cell-link" href={`#/app/loans/${loan.id}`}>{loan.loan_number}</a></span> : null
-      })}</>}</>,
-    })),
-    ...loans.map(l => ({
-      at: l.origination_date ?? '', label: <>Loan <a className="cell-link" href={`#/app/loans/${l.id}`}>{l.loan_number}</a> originated — {l.type}, {money(l.amount)}</>,
-    })),
-  ].filter(e => e.at).sort((a, b) => (a.at < b.at ? 1 : -1))
+  const timeline: Ev[] = loans.map(l => ({
+    at: l.origination_date ?? '', label: <>Loan <a className="cell-link" href={`#/app/loans/${l.id}`}>{l.loan_number}</a> originated — {l.type}, {money(l.amount)}</>,
+  })).filter(e => e.at).sort((a, b) => (a.at < b.at ? 1 : -1))
 
   const latest = spreads.filter(s => s.status === 'reviewed').slice(-2)
 
@@ -127,7 +111,6 @@ export function BorrowerPage({ org, customerId }: { org: Org; customerId: string
             <span><b>{money(exposure)}</b><i>loan exposure · {loans.length} loans</i></span>
             <span><b>{money(depTotal)}</b><i>deposits · {deposits.length} accounts</i></span>
             <span><b>{lineCommit ? `${Math.round((lineDrawn / lineCommit) * 100)}%` : '—'}</b><i>line utilization</i></span>
-            <span><b>{deals.filter(d => !['Funded', 'Declined', 'Withdrawn'].includes(d.stage)).length}</b><i>deals in flight</i></span>
           </div>
         </div>
       </div>
@@ -135,7 +118,7 @@ export function BorrowerPage({ org, customerId }: { org: Org; customerId: string
       <div className="two-col" style={{ marginTop: 18 }}>
         <div>
           <div className="grid" style={{ marginBottom: 20 }}>
-            <div className="uw-head"><span><b>Relationship timeline</b> <span className="small">deals become loans — one thread</span></span></div>
+            <div className="uw-head"><span><b>Relationship timeline</b> <span className="small">every origination — one thread</span></span></div>
             {timeline.length ? timeline.map((e, i) => (
               <div className="alert" key={i}>
                 <span className="small mono" style={{ width: 84 }}>{fmtDate(e.at)}</span>

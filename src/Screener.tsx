@@ -24,7 +24,7 @@ export default function Screener({ org }: { org: Org | null }) {
   const input = useRef<HTMLInputElement>(null)
 
   const run = async (file: File | null) => {
-    const name = file?.name ?? 'Lakeside_Crossing_OM.pdf (sample)'
+    const name = file?.name ?? 'Mesa_Ridge_Dental_OM.pdf (sample)'
     setPhase({ kind: 'running', step: 0, name })
     try {
       const deal = await extractMemo(file, step => setPhase({ kind: 'running', step, name }))
@@ -43,8 +43,8 @@ export default function Screener({ org }: { org: Org | null }) {
   return (
     <>
       <div className="dbtag"><Ico.doc /> CRE Screener · {API_URL ? `API: ${API_URL}` : 'Demo mode — no extraction API configured'}</div>
-      <h1>Underwrite a deal from its offering memo</h1>
-      <p className="subtitle">Drop an OM or opportunity memo. Unlimited-OCR reads every page, the extractor builds the deal sheet, and policy tests run instantly — every value cites its source page.</p>
+      <h1>Underwrite a practice loan from its memo</h1>
+      <p className="subtitle">Drop an offering memo, practice appraisal or loan request. Unlimited-OCR reads every page, the extractor builds the deal sheet, and policy tests run instantly — every value cites its source page.</p>
 
       {phase.kind !== 'done' && (
         <div
@@ -101,47 +101,40 @@ function Results({ deal, org, policy, setPolicy, reset }: { deal: DealSheet; org
     setAdded(true)
 
     if (org) {
-      // Signed in: the screened memo becomes a DEAL — the origination pipeline picks it up from here.
+      // Signed in: the screened memo becomes a LOAN in the portfolio.
       const property = g('property_name')?.text ?? 'property'
       const { data: cust } = await supabase.from('customers')
         .insert({ org_id: org.id, name: g('guarantor')?.text?.split(' (')[0] ?? sponsor, company: sponsor })
         .select().single()
-      const { data: newDeal } = await supabase.from('deals').insert({
-        org_id: org.id, name: `${sponsor} — ${property}`, customer_id: cust?.id ?? null,
-        stage: 'Underwriting', purpose: `Acquisition — ${property}`, probability: 0.6,
-        rm: 'Unassigned', rating: 5, rating_factors: {},
+      const { data: newLoan } = await supabase.from('loans').insert({
+        org_id: org.id, customer_id: cust?.id ?? null,
+        loan_number: `CL-2026-${String(100 + Math.floor(Math.random() * 900))}`,
+        type: 'Owner-Occupied CRE', stage: 'Underwriting',
+        amount: g('loan_amount')?.number ?? 0, rate, term,
+        ltv, dscr, rm: 'Unassigned',
+        collateral: `1st DOT — ${property}`,
       }).select().single()
-      if (newDeal) {
-        await supabase.from('facilities').insert({
-          org_id: org.id, deal_id: newDeal.id, facility_type: 'Investor CRE term',
-          amount: g('loan_amount')?.number ?? 0, rate_display: rate, rate_pct: policy.rate * 100,
-          term_months: 120, amort_months: policy.amortYears * 12, io_months: 0, origination_fee_bps: 50,
-        })
-        await supabase.from('deal_parties').insert([
-          { org_id: org.id, deal_id: newDeal.id, customer_id: cust?.id ?? null, name: sponsor, role: 'Borrower' },
-          ...(g('guarantor')?.text ? [{ org_id: org.id, deal_id: newDeal.id, name: g('guarantor')!.text!.split(' (')[0], role: 'Guarantor' }] : []),
-        ])
-        if (g('purchase_price')?.number) {
-          await supabase.from('collateral').insert({
-            org_id: org.id, deal_id: newDeal.id, customer_id: cust?.id ?? null, collateral_type: 'Real estate',
-            description: property, address: g('address')?.text ?? null,
-            value: g('purchase_price')!.number!, value_source: 'Purchase price', advance_rate: 0.75,
+      if (newLoan) {
+        if (g('guarantor')?.text) {
+          await supabase.from('guarantors').insert({
+            org_id: org.id, loan_id: newLoan.id, name: g('guarantor')!.text!.split(' (')[0], guarantee_type: 'Unlimited',
           })
         }
-        toast('Deal created from the memo — continuing in the pipeline')
-        window.location.hash = `#/app/deals/${newDeal.id}`
+        toast('Loan created from the memo — now in your portfolio')
+        window.location.hash = `#/app/loans/${newLoan.id}`
       }
       return
     }
 
     loans.unshift({
-      id: `CL-2026-${String(80 + loans.length).padStart(3, '0')}`, borrower: sponsor, type: 'Investor CRE',
+      id: `CL-2026-${String(80 + loans.length).padStart(3, '0')}`, borrower: sponsor, type: 'Owner-Occupied CRE',
       amount: g('loan_amount')?.number ?? 0, stage: 'Application', rm: 'Unassigned', riskRating: 0,
       nextAction: `Screened from ${deal.source.filename} — ${fails ? `${fails} policy flag${fails > 1 ? 's' : ''}` : 'passes policy'}`,
       rate: rate ?? '—', term: term ?? '—', ltv: ltv === null ? null : ltv * 100, dscr,
       maturity: '—', collateral: `1st DOT — ${g('property_name')?.text ?? 'property'}`,
     })
-    window.location.hash = '#/portfolio'
+    toast('Sign up to save this loan to a portfolio')
+    window.location.hash = '#/signup'
   }
 
   return (
@@ -154,7 +147,7 @@ function Results({ deal, org, policy, setPolicy, reset }: { deal: DealSheet; org
         <span className="spacer" />
         <div className="tools">
           <button className="btn-light" onClick={reset}>New memo</button>
-          <button className="btn-dark" style={{ marginLeft: 8 }} onClick={addToPipeline} disabled={added}>{org ? 'Create deal' : 'Add to pipeline'} <Ico.plus /></button>
+          <button className="btn-dark" style={{ marginLeft: 8 }} onClick={addToPipeline} disabled={added}>{org ? 'Create loan' : 'Add to portfolio'} <Ico.plus /></button>
         </div>
       </div>
 

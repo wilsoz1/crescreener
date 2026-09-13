@@ -40,7 +40,7 @@ export default function Marketing({ authed }: { authed: boolean }) {
       <div className="mk-frame">
         {/* Hero */}
         <section className="mk-hero">
-          <span className="mk-badge">Portfolio management for commercial credit teams</span>
+          <span className="mk-badge">Portfolio management for dental practice lenders</span>
           <h1>Stop Chasing,<br />Start Knowing</h1>
           <p className="mk-sub">From uploaded tax return to tested covenant, your book watches itself — and tells you what needs you.</p>
           <div className="mk-hero-ctas">
@@ -51,8 +51,8 @@ export default function Marketing({ authed }: { authed: boolean }) {
           <div className="mk-collage">
             <div className="mk-mock mk-activity" aria-label="Borrower activity example">
               <div className="who">
-                <span className="mk-avatar">CF</span>
-                <span><b>Cascade Fabrication</b><span>praman@cascadefab.com</span></span>
+                <span className="mk-avatar">CO</span>
+                <span><b>Cascade Orthodontics</b><span>praman@cascadeortho.com</span></span>
               </div>
               <div className="mk-ev">
                 <b>Tax return uploaded</b>
@@ -74,17 +74,17 @@ export default function Marketing({ authed }: { authed: boolean }) {
             <div className="mk-stack" aria-label="Work queue example">
               <div className="mk-row">
                 <span className="ic red"><Ico.x /></span>
-                <span><b>Cascade Fabrication — CL-2026-066</b><span className="meta">payment of $17,850 missed</span></span>
+                <span><b>Cascade Orthodontics — CL-2026-066</b><span className="meta">payment of $17,850 missed</span></span>
                 <span className="mk-pill red"><span className="dot" /> 13 days past due</span>
               </div>
               <div className="mk-row">
                 <span className="ic amber"><Ico.clock /></span>
-                <span><b>Riverbend Medical — acquisition package</b><span className="meta">Senior Credit Officer</span></span>
-                <span className="mk-pill amber"><span className="dot" /> approval waiting</span>
+                <span><b>Riverbend Dental Partners — annual review</b><span className="meta">production report 12 days late</span></span>
+                <span className="mk-pill amber"><span className="dot" /> reporting past due</span>
               </div>
               <div className="mk-row">
                 <span className="ic purple"><Ico.doc /></span>
-                <span><b>Harbor Point Logistics — T-12 Jun 2026</b><span className="meta">extracted 41s ago</span></span>
+                <span><b>Harbor Point Dental Group — T-12 Jun 2026</b><span className="meta">extracted 41s ago</span></span>
                 <span className="mk-pill purple"><span className="dot" /> spread ready</span>
               </div>
             </div>
@@ -119,8 +119,8 @@ export default function Marketing({ authed }: { authed: boolean }) {
 
         {/* Monitoring collage */}
         <section className="mk-section" id="mk-monitoring">
-          <h2>Every borrower tells a story</h2>
-          <p>Real-time monitoring that turns documents into decisions.</p>
+          <h2>Every practice tells a story</h2>
+          <p>Real-time monitoring that turns documents into decisions — across start-up, expansion and owner-occupied CRE loans.</p>
           <a className="mk-link" href="#/screener">Explore the live demo <Arrow /></a>
         </section>
         <div className="mk-analytics">
@@ -147,10 +147,9 @@ export default function Marketing({ authed }: { authed: boolean }) {
           <div className="mk-panel-card" style={{ width: 280 }}>
             <h4>Portfolio mix <i>by commitment</i></h4>
             {[
-              ['Owner-occupied CRE', 'var(--mk-blue)', 34, '$8.4M'],
-              ['Investor CRE', 'var(--mk-purple)', 27, '$6.7M'],
-              ['Construction', 'var(--mk-pink)', 26, '$6.4M'],
-              ['Equipment', 'var(--mk-green)', 13, '$3.3M'],
+              ['Owner-occupied CRE', 'var(--mk-blue)', 44, '$10.9M'],
+              ['Expansion loans', 'var(--mk-purple)', 38, '$9.5M'],
+              ['Start-up loans', 'var(--mk-green)', 18, '$4.4M'],
             ].map(([label, color, pct, val]) => (
               <div className="mk-bar-row" key={label as string}>
                 <span className="swatch" style={{ background: color as string }} />
@@ -227,9 +226,9 @@ export default function Marketing({ authed }: { authed: boolean }) {
               <table>
                 <tbody>
                   <tr><td><span className="mk-pill red">past due</span></td><td>$17,850 · 13 days on CL-2026-066</td><td style={{ textAlign: 'right', color: 'var(--mk-blue)', fontWeight: 600 }}>Open loan</td></tr>
-                  <tr><td><span className="mk-pill amber">approval</span></td><td>Senior Credit Officer waiting</td><td style={{ textAlign: 'right', color: 'var(--mk-blue)', fontWeight: 600 }}>Review</td></tr>
-                  <tr><td><span className="mk-pill purple">spread</span></td><td>FY 2026 draft · Cascade Fabrication</td><td style={{ textAlign: 'right', color: 'var(--mk-blue)', fontWeight: 600 }}>Approve</td></tr>
-                  <tr><td><span className="mk-pill blue">document</span></td><td>scan_0001.pdf needs routing</td><td style={{ textAlign: 'right', color: 'var(--mk-blue)', fontWeight: 600 }}>Route</td></tr>
+                  <tr><td><span className="mk-pill amber">covenant</span></td><td>FCC 1.18x vs 1.20x · Bluestem Pediatric</td><td style={{ textAlign: 'right', color: 'var(--mk-blue)', fontWeight: 600 }}>Review</td></tr>
+                  <tr><td><span className="mk-pill purple">spread</span></td><td>FY 2026 draft · Cascade Orthodontics</td><td style={{ textAlign: 'right', color: 'var(--mk-blue)', fontWeight: 600 }}>Approve</td></tr>
+                  <tr><td><span className="mk-pill blue">tickler</span></td><td>PFS renewal · Saguaro Family Dentistry</td><td style={{ textAlign: 'right', color: 'var(--mk-blue)', fontWeight: 600 }}>Request</td></tr>
                 </tbody>
               </table>
             </div>

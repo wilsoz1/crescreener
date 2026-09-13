@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase, DbLoan, Org, Payment, PaymentType, Deposit, CreditLine, money, pastDueOf } from './supabase'
+import { ModifyButton } from './Modify'
 import { Ico } from './Icons'
 
 const PAYMENT_TYPES: PaymentType[] = ['P&I', 'I/O', 'Deferred', 'I/O Deferred', 'Construction']
@@ -112,7 +113,7 @@ export default function Loans({ org }: { org: Org }) {
         <table>
           <thead><tr>
             <th>Loan</th><th>Borrower</th><th>Type</th><th>Stage</th><th>Payment</th><th>Reviews</th><th>Past due</th>
-            <th className="num">Amount</th><th>Rate</th><th>Maturity</th><th>Draw period end</th><th>RM</th>
+            <th className="num">Amount</th><th>Rate</th><th>Maturity</th><th>Draw period end</th><th>RM</th><th></th>
           </tr></thead>
           <tbody>
             {rows.map(l => {
@@ -135,10 +136,11 @@ export default function Loans({ org }: { org: Org }) {
                   <td>{fmtDate(l.maturity)}</td>
                   <td>{fmtDate(l.draw_period_end)}</td>
                   <td>{l.rm ?? '—'}</td>
+                  <td onClick={e => e.stopPropagation()}><ModifyButton org={org} loan={l} small /></td>
                 </tr>
               )
             })}
-            {!rows.length && <tr><td colSpan={12} className="small">No loans match these filters.</td></tr>}
+            {!rows.length && <tr><td colSpan={13} className="small">No loans match these filters.</td></tr>}
           </tbody>
         </table>
       </div>

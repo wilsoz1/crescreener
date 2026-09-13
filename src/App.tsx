@@ -2,12 +2,9 @@ import { useEffect, useState } from 'react'
 import Marketing from './Marketing'
 import Screener from './Screener'
 import Today from './Today'
-import Deals from './Deals'
-import DealPage from './DealPage'
 import Loans from './Loans'
 import LoanPage from './LoanPage'
 import Borrowers, { BorrowerPage } from './Borrowers'
-import Operations from './Operations'
 import Search from './Search'
 import SharePage from './SharePage'
 import { SignIn, Onboarding } from './Auth'
@@ -28,14 +25,12 @@ const useHash = () => {
 
 const NAV = [
   { href: '#/app', key: '', icon: Ico.status, label: 'Today' },
-  { href: '#/app/pipeline', key: 'pipeline', icon: Ico.sort, label: 'Pipeline' },
   { href: '#/app/portfolio', key: 'portfolio', icon: Ico.doc, label: 'Portfolio' },
   { href: '#/app/borrowers', key: 'borrowers', icon: Ico.building, label: 'Borrowers' },
   { href: '#/app/screener', key: 'screener', icon: Ico.search, label: 'Screener' },
-  { href: '#/app/operations', key: 'operations', icon: Ico.sliders, label: 'Operations' },
 ]
 // Detail routes highlight their parent section.
-const PARENT: Record<string, string> = { deals: 'pipeline', loans: 'portfolio' }
+const PARENT: Record<string, string> = { loans: 'portfolio' }
 
 export default function App() {
   const hash = useHash()
@@ -94,14 +89,11 @@ export default function App() {
     app.loading ? null
     : !authed ? null
     : !app.org ? <Onboarding app={app} />
-    : sub === 'deals' && subId ? <DealPage org={app.org} dealId={subId} initialTab={sub2} />
-    : sub === 'pipeline' || sub === 'deals' ? <Deals org={app.org} />
     : sub === 'loans' && subId ? <LoanPage org={app.org} loanId={subId} initialTab={sub2} />
     : sub === 'portfolio' || sub === 'loans' ? <Loans org={app.org} />
     : sub === 'borrowers' && subId ? <BorrowerPage org={app.org} customerId={subId} />
     : sub === 'borrowers' ? <Borrowers org={app.org} />
     : sub === 'screener' ? <Screener org={app.org} />
-    : sub === 'operations' ? <Operations org={app.org} />
     : <Today org={app.org} />
 
   return (

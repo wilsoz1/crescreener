@@ -5,6 +5,7 @@ import { classifyType } from './Documents'
 import { API_URL, aiSpread, aiProcessDocument } from './api'
 import { confirmDialog, promptDialog, toast, currentUserName, Skeleton } from './dialogs'
 import { DraftButton } from './Ai'
+import { ModifyButton } from './Modify'
 import { Ico } from './Icons'
 
 const shareUrl = (token: string) => `${window.location.origin}/#/share/${token}`
@@ -45,8 +46,6 @@ export default function LoanPage({ org, loanId, initialTab }: { org: Org; loanId
     setTabState(t)
     history.replaceState(null, '', `#/app/loans/${loanId}/${encodeURIComponent(t)}`)
   }
-  const [fromDeal, setFromDeal] = useState<{ id: string; name: string } | null>(null)
-
   const load = async () => {
     const { data: l } = await supabase.from('loans').select('*, customers(name, company, email, phone)').eq('id', loanId).single()
     setLoan((l as DbLoan) ?? null)
@@ -87,11 +86,6 @@ export default function LoanPage({ org, loanId, initialTab }: { org: Org; loanId
   }
   useEffect(() => {
     load()
-    supabase.from('facilities').select('deal_id, deals(name)').eq('loan_id', loanId).limit(1)
-      .then(({ data }) => {
-        const row = data?.[0] as { deal_id: string; deals: { name: string } | null } | undefined
-        if (row) setFromDeal({ id: row.deal_id, name: row.deals?.name ?? 'deal' })
-      })
   }, [loanId])
 
   if (loading) return <Skeleton rows={7} />
@@ -116,7 +110,7 @@ export default function LoanPage({ org, loanId, initialTab }: { org: Org; loanId
 
   return (
     <>
-      <div className="crumb-row"><a href="#/app/portfolio">← Portfolio</a>{fromDeal && <span className="small"> · originated from <a className="cell-link" href={`#/app/deals/${fromDeal.id}`}>{fromDeal.name}</a></span>}</div>
+      <div className="crumb-row"><a href="#/app/portfolio">← Portfolio</a></div>
 
       {/* Level 0: identity + health + actions */}
       <div className="viewbar" style={{ marginBottom: 4, alignItems: 'flex-start' }}>
@@ -143,6 +137,7 @@ export default function LoanPage({ org, loanId, initialTab }: { org: Org; loanId
               load()
             }}
           />
+          <ModifyButton org={org} loan={loan} />
           <button className="btn-light" onClick={() => setTab('Activity')}>Add note</button>
           <ShareControls org={org} loanId={loanId} docs={docs} onChange={load} />
         </div>
