@@ -1,7 +1,7 @@
 // Portfolio — the book as a flat list of loan numbers. The loan is the unit of work:
 // everything about a borrower (contact, guarantors, cash flow, deposits) is reached
 // through the loan's detail page, never a separate section.
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase, DbLoan, Org, Payment, PaymentType, money, pastDueOf } from './supabase'
 import { ModifyButton } from './Modify'
 import { Ico } from './Icons'
@@ -19,12 +19,21 @@ export const fmtDate = (d: string | null) =>
 
 type Review = 'Covenant' | 'Annual review'
 type Filters = {
-  drawEndBy: string
   pay: Set<PaymentType>
-  pastDueOnly: boolean
   reviews: Set<Review>
+  pastDueOnly: boolean
+  inDraw: boolean
 }
-const EMPTY: Filters = { drawEndBy: '', pay: new Set(), pastDueOnly: false, reviews: new Set() }
+const EMPTY: Filters = { pay: new Set(), reviews: new Set(), pastDueOnly: false, inDraw: false }
+
+type SortKey = 'loan' | 'borrower' | 'type' | 'stage' | 'payment' | 'pastdue' | 'amount' | 'rate' | 'maturity' | 'drawend' | 'rm'
+
+// "7.10% fixed" → 7.10 · "SOFR + 325" → 3.25 · "Prime + 75" → 0.75 — good enough to order by.
+const rateKey = (r: string | null) => {
+  const n = parseFloat(r?.match(/[\d.]+/)?.[0] ?? '')
+  if (!Number.isFinite(n)) return -1
+  return n > 50 ? n / 100 : n
+}
 
 export default function Loans({ org }: { org: Org }) {
   const [loans, setLoans] = useState<DbLoan[]>([])
@@ -32,6 +41,9 @@ export default function Loans({ org }: { org: Org }) {
   const [reviewMap, setReviewMap] = useState<Record<string, Review[]>>({})
   const [loading, setLoading] = useState(true)
   const [f, setF] = useState<Filters>(EMPTY)
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'loan', dir: 1 })
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const popRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     Promise.all([
@@ -56,13 +68,48 @@ export default function Loans({ org }: { org: Org }) {
     })
   }, [org.id])
 
-  const rows = useMemo(() => loans.filter(l => {
-    if (f.drawEndBy && (!l.draw_period_end || l.draw_period_end > f.drawEndBy)) return false
-    if (f.pay.size && !f.pay.has(l.payment_type)) return false
-    if (f.pastDueOnly && !pastDueOf(payments, l.id)) return false
-    if (f.reviews.size && ![...f.reviews].every(r => reviewMap[l.id]?.includes(r))) return false
-    return true
-  }), [loans, payments, reviewMap, f])
+  useEffect(() => {
+    const close = (e: MouseEvent) => { if (!popRef.current?.contains(e.target as Node)) setFiltersOpen(false) }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [])
+
+  const today = new Date().toISOString().slice(0, 10)
+  const rows = useMemo(() => {
+    const val = (l: DbLoan): string | number => {
+      switch (sort.key) {
+        case 'loan': return l.loan_number
+        case 'borrower': return l.customers?.company ?? ''
+        case 'type': return l.type
+        case 'stage': return l.stage === 'Servicing' ? 'Active' : l.stage
+        case 'payment': return l.payment_type
+        case 'pastdue': return pastDueOf(payments, l.id)?.days ?? -1
+        case 'amount': return Number(l.amount)
+        case 'rate': return rateKey(l.rate)
+        case 'maturity': return l.maturity ?? ''
+        case 'drawend': return l.draw_period_end ?? ''
+        case 'rm': return l.rm ?? ''
+      }
+    }
+    return loans
+      .filter(l => {
+        if (f.pay.size && !f.pay.has(l.payment_type)) return false
+        if (f.pastDueOnly && !pastDueOf(payments, l.id)) return false
+        if (f.inDraw && !(l.draw_period_end && l.draw_period_end >= today)) return false
+        if (f.reviews.size && ![...f.reviews].every(r => reviewMap[l.id]?.includes(r))) return false
+        return true
+      })
+      .sort((a, b) => {
+        const va = val(a), vb = val(b)
+        const cmp = typeof va === 'number' && typeof vb === 'number'
+          ? va - vb
+          : String(va).localeCompare(String(vb), undefined, { numeric: true })
+        return cmp * sort.dir
+      })
+  }, [loans, payments, reviewMap, f, sort, today])
+
+  const toggleSort = (key: SortKey) =>
+    setSort(s => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: key === 'amount' || key === 'pastdue' ? -1 : 1 }))
 
   const togglePay = (p: PaymentType) => {
     const pay = new Set(f.pay)
@@ -74,7 +121,17 @@ export default function Loans({ org }: { org: Org }) {
     reviews.has(r) ? reviews.delete(r) : reviews.add(r)
     setF({ ...f, reviews })
   }
-  const active = f.drawEndBy || f.pay.size > 0 || f.pastDueOnly || f.reviews.size > 0
+  const activeCount = f.pay.size + f.reviews.size + (f.pastDueOnly ? 1 : 0) + (f.inDraw ? 1 : 0)
+  const pastDueCount = loans.filter(l => pastDueOf(payments, l.id)).length
+
+  const Th = ({ label, k, num }: { label: string; k: SortKey; num?: boolean }) => (
+    <th className={num ? 'num' : undefined}
+      aria-sort={sort.key === k ? (sort.dir === 1 ? 'ascending' : 'descending') : undefined}
+      onClick={() => toggleSort(k)} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
+      title={`Sort by ${label.toLowerCase()}`}>
+      {label}{sort.key === k ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''}
+    </th>
+  )
 
   if (loading) return <p className="subtitle">Loading portfolio…</p>
 
@@ -87,33 +144,64 @@ export default function Loans({ org }: { org: Org }) {
       </p>
 
       <div className="filters">
-        <div className="f-group">
-          <span className="f-label"><Ico.clock /> Draw period ends by</span>
-          <input type="date" aria-label="Draw period ends by" value={f.drawEndBy} onChange={e => setF({ ...f, drawEndBy: e.target.value })} />
+        <div ref={popRef} style={{ position: 'relative', display: 'inline-block' }}>
+          <button className={activeCount ? 'btn-dark' : 'btn-light'} onClick={() => setFiltersOpen(o => !o)}
+            aria-expanded={filtersOpen} aria-haspopup="true">
+            <Ico.sort /> Filters{activeCount ? ` · ${activeCount}` : ''}
+          </button>
+          {filtersOpen && (
+            <div className="share-pop" style={{ left: 0, right: 'auto', width: 300 }} role="dialog" aria-label="Portfolio filters">
+              <b className="small" style={{ textTransform: 'uppercase', letterSpacing: '.4px' }}>Payment structure</b>
+              {PAYMENT_TYPES.map(p => (
+                <label className="share-doc" key={p}>
+                  <input type="checkbox" checked={f.pay.has(p)} onChange={() => togglePay(p)} /> {p}
+                </label>
+              ))}
+              <b className="small" style={{ textTransform: 'uppercase', letterSpacing: '.4px', display: 'block', marginTop: 12 }}>Reviews</b>
+              {(['Covenant', 'Annual review'] as Review[]).map(r => (
+                <label className="share-doc" key={r}>
+                  <input type="checkbox" checked={f.reviews.has(r)} onChange={() => toggleReview(r)} /> {r}
+                </label>
+              ))}
+              <b className="small" style={{ textTransform: 'uppercase', letterSpacing: '.4px', display: 'block', marginTop: 12 }}>Status</b>
+              <label className="share-doc">
+                <input type="checkbox" checked={f.pastDueOnly} onChange={() => setF({ ...f, pastDueOnly: !f.pastDueOnly })} /> Past due ({pastDueCount})
+              </label>
+              <label className="share-doc">
+                <input type="checkbox" checked={f.inDraw} onChange={() => setF({ ...f, inDraw: !f.inDraw })} /> In draw period
+              </label>
+              {activeCount > 0 && (
+                <button className="btn-light" style={{ marginTop: 12 }}
+                  onClick={() => setF({ pay: new Set(), reviews: new Set(), pastDueOnly: false, inDraw: false })}>
+                  Clear all
+                </button>
+              )}
+            </div>
+          )}
         </div>
-        <div className="f-group">
-          <span className="f-label"><Ico.tag /> Payment</span>
-          {PAYMENT_TYPES.map(p => (
-            <button key={p} className={`f-chip ${f.pay.has(p) ? 'on' : ''}`} onClick={() => togglePay(p)}>{p}</button>
-          ))}
-        </div>
-        <div className="f-group">
-          <span className="f-label"><Ico.shield /> Reviews</span>
-          {(['Covenant', 'Annual review'] as Review[]).map(r => (
-            <button key={r} className={`f-chip ${f.reviews.has(r) ? 'on' : ''}`} onClick={() => toggleReview(r)}>{r}</button>
-          ))}
-        </div>
-        <button className={`f-chip red ${f.pastDueOnly ? 'on' : ''}`} onClick={() => setF({ ...f, pastDueOnly: !f.pastDueOnly })}>
-          Past due ({loans.filter(l => pastDueOf(payments, l.id)).length})
-        </button>
-        {active && <button className="btn-light" onClick={() => setF({ ...EMPTY, pay: new Set(), reviews: new Set() })}>Clear filters</button>}
+        {activeCount > 0 && (
+          <span className="small">
+            {[...f.pay, ...f.reviews, ...(f.pastDueOnly ? ['Past due'] : []), ...(f.inDraw ? ['In draw period'] : [])].join(' · ')}
+          </span>
+        )}
       </div>
 
       <div className="grid">
         <table>
           <thead><tr>
-            <th>Loan</th><th>Type</th><th>Stage</th><th>Payment</th><th>Reviews</th><th>Past due</th>
-            <th className="num">Amount</th><th>Rate</th><th>Maturity</th><th>Draw period end</th><th>RM</th><th></th>
+            <Th label="Loan" k="loan" />
+            <Th label="Borrower" k="borrower" />
+            <Th label="Type" k="type" />
+            <Th label="Stage" k="stage" />
+            <Th label="Payment" k="payment" />
+            <th>Reviews</th>
+            <Th label="Past due" k="pastdue" />
+            <Th label="Amount" k="amount" num />
+            <Th label="Rate" k="rate" />
+            <Th label="Maturity" k="maturity" />
+            <Th label="Draw period end" k="drawend" />
+            <Th label="RM" k="rm" />
+            <th></th>
           </tr></thead>
           <tbody>
             {rows.map(l => {
@@ -121,6 +209,11 @@ export default function Loans({ org }: { org: Org }) {
               return (
                 <tr key={l.id} className="rowlink" onClick={() => (window.location.hash = `#/app/loans/${l.id}`)}>
                   <td className="mono"><a className="cell-link" href={`#/app/loans/${l.id}`}>{l.loan_number}</a></td>
+                  <td className="ellipsis" title={l.customers?.company ?? undefined}>
+                    {l.customer_id
+                      ? <a className="cell-link" href={`#/app/loans/${l.id}/Borrower`} onClick={e => e.stopPropagation()}>{l.customers?.company ?? '—'}</a>
+                      : '—'}
+                  </td>
                   <td>{l.type}</td>
                   <td><span className={`status ${stageCls[l.stage] ?? 's-gray'}`}>{l.stage === 'Servicing' ? 'Active' : l.stage}</span></td>
                   <td><span className={`status ${payCls[l.payment_type]}`}>{l.payment_type}</span></td>
@@ -139,7 +232,7 @@ export default function Loans({ org }: { org: Org }) {
                 </tr>
               )
             })}
-            {!rows.length && <tr><td colSpan={12} className="small">No loans match these filters.</td></tr>}
+            {!rows.length && <tr><td colSpan={13} className="small">No loans match these filters.</td></tr>}
           </tbody>
         </table>
       </div>
