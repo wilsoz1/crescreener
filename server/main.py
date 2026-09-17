@@ -133,14 +133,29 @@ def ocr(data: bytes, filename: str, first_page_only: bool = False) -> str:
             {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(p).decode()}}
             for p in batch
         ]
-        r = httpx.post(f"{OCR_BASE_URL}/chat/completions", timeout=1200, json={
-            "model": OCR_MODEL, "temperature": 0, "max_tokens": 32768,
-            "messages": [{"role": "user", "content": content}],
-        })
-        r.raise_for_status()
+        try:
+            text = _ocr_call(content, temperature=0)
+        except httpx.HTTPStatusError:
+            # Greedy decoding can lock onto repeated glyph runs (leader dots, table
+            # borders, underscore fill-ins) and trip Ollama's repeat-abort guard.
+            # A little temperature breaks the loop; a page that still fails is
+            # skipped rather than failing the whole document.
+            try:
+                text = _ocr_call(content, temperature=0.4)
+            except httpx.HTTPStatusError as e:
+                text = f"[pages {i + 1}-{i + len(batch)} unreadable — OCR aborted ({e.response.status_code})]"
         label = f"=== PAGE {i + 1} ===" if len(batch) == 1 else f"=== PAGE {i + 1}–{i + len(batch)} ==="
-        chunks.append(label + "\n" + r.json()["choices"][0]["message"]["content"])
+        chunks.append(label + "\n" + text)
     return "\n".join(chunks)
+
+
+def _ocr_call(content: List[Dict[str, Any]], temperature: float) -> str:
+    r = httpx.post(f"{OCR_BASE_URL}/chat/completions", timeout=1200, json={
+        "model": OCR_MODEL, "temperature": temperature, "max_tokens": 32768,
+        "messages": [{"role": "user", "content": content}],
+    })
+    r.raise_for_status()
+    return r.json()["choices"][0]["message"]["content"]
 
 
 def llm_json(system: str, user: str, schema: Dict[str, Any], mock: Any = None) -> Any:
@@ -152,7 +167,10 @@ def llm_json(system: str, user: str, schema: Dict[str, Any], mock: Any = None) -
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         "response_format": {"type": "json_schema", "json_schema": {"name": "out", "schema": schema}},
     })
-    r.raise_for_status()
+    if r.status_code >= 300:
+        # HTTPException keeps CORS headers on the response; a raw crash would
+        # surface in the browser as an unreadable "failed to fetch".
+        raise HTTPException(502, f"LLM backend error: {r.text[:200]}")
     return json.loads(r.json()["choices"][0]["message"]["content"])
 
 
@@ -163,7 +181,8 @@ def llm_text(system: str, user: str, mock: str = "") -> str:
         "model": LLM_MODEL, "temperature": 0.3, "max_tokens": 4096,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
     })
-    r.raise_for_status()
+    if r.status_code >= 300:
+        raise HTTPException(502, f"LLM backend error: {r.text[:200]}")
     return r.json()["choices"][0]["message"]["content"]
 
 
