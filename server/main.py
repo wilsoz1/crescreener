@@ -37,6 +37,9 @@ OCR_BASE_URL = os.environ.get("OCR_BASE_URL", "http://127.0.0.1:8001/v1").rstrip
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://127.0.0.1:8002/v1").rstrip("/")
 LLM_MODEL = os.environ.get("LLM_MODEL", "Qwen/Qwen3-32B-AWQ")
 OCR_MODEL = os.environ.get("OCR_MODEL", "Unlimited-OCR")
+# Unlimited-OCR is trained on this exact phrase; generic vision models (e.g. qwen2.5vl
+# on Ollama) need an explicit transcription instruction instead.
+OCR_PROMPT = os.environ.get("OCR_PROMPT", "Multi page parsing.")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://ngmpmyuwacwbwtqtinos.supabase.co").rstrip("/")
 SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 MOCK = os.environ.get("MOCK") == "1"
@@ -121,7 +124,7 @@ def ocr(data: bytes, filename: str, first_page_only: bool = False) -> str:
         pages = pages[:1]
     chunks = []
     for i in range(0, len(pages), 8):
-        content = [{"type": "text", "text": "Multi page parsing."}] + [
+        content = [{"type": "text", "text": OCR_PROMPT}] + [
             {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(p).decode()}}
             for p in pages[i:i + 8]
         ]
