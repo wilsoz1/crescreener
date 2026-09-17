@@ -15,4 +15,6 @@ export OCR_BATCH_PAGES=1
 # hitting Ollama's token-repeat abort on forms with dotted leader lines.
 export OCR_PROMPT="Transcribe every word and number on this page image to markdown, preserving layout and tables. Replace any long run of dots, dashes or underscores (leader lines) with a single colon. No commentary."
 export SUPABASE_SERVICE_ROLE_KEY="$(cat .env.key)"
+# Local debugging: every request dumps what the OCR saw and what was extracted.
+export DEBUG_DIR=/tmp
 exec .venv/bin/uvicorn main:app --port 8787

@@ -44,6 +44,10 @@ OCR_PROMPT = os.environ.get("OCR_PROMPT", "Multi page parsing.")
 # VLMs do best with 1 — the gateway then stamps an exact '=== PAGE n ===' per page,
 # which is what gives extractions their page citations.
 OCR_BATCH = max(int(os.environ.get("OCR_BATCH_PAGES", "8")), 1)
+OCR_DPI = int(os.environ.get("OCR_DPI", "200"))
+# When set, every request dumps its OCR text and extraction JSON here — the only way
+# to tell an OCR miss from an extraction miss on a real document.
+DEBUG_DIR = os.environ.get("DEBUG_DIR", "")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://ngmpmyuwacwbwtqtinos.supabase.co").rstrip("/")
 SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 MOCK = os.environ.get("MOCK") == "1"
@@ -121,7 +125,7 @@ def ocr(data: bytes, filename: str, first_page_only: bool = False) -> str:
     if MOCK:
         return _mock_ocr(filename)
     if filename.lower().endswith(".pdf"):
-        pages = pdf_to_pngs(data)
+        pages = pdf_to_pngs(data, dpi=OCR_DPI)
     else:
         pages = [data]
     if first_page_only:
@@ -146,7 +150,14 @@ def ocr(data: bytes, filename: str, first_page_only: bool = False) -> str:
                 text = f"[pages {i + 1}-{i + len(batch)} unreadable — OCR aborted ({e.response.status_code})]"
         label = f"=== PAGE {i + 1} ===" if len(batch) == 1 else f"=== PAGE {i + 1}–{i + len(batch)} ==="
         chunks.append(label + "\n" + text)
-    return "\n".join(chunks)
+    out = "\n".join(chunks)
+    if DEBUG_DIR:
+        try:
+            with open(os.path.join(DEBUG_DIR, "crescreener-last-ocr.md"), "w") as fh:
+                fh.write(f"<!-- {filename} · {len(pages)} page(s) · dpi {OCR_DPI} -->\n{out}")
+        except OSError:
+            pass
+    return out
 
 
 def _ocr_call(content: List[Dict[str, Any]], temperature: float) -> str:
@@ -541,12 +552,15 @@ async def extract_om(file: UploadFile = File(...)):
         fields = llm_json(
             "You are a commercial credit analyst spreading an operating company from its tax return, "
             "financial statements or acquisition package (pages marked '=== PAGE n ==='). "
-            "Fill every field: text as written; number normalized (dollars plain, percents as fractions); "
-            "page where found; confidence 0-1. ebitda = operating income + depreciation if not stated; "
-            "if only a combined 'total deductions' line exists, operating_expenses = total deductions - "
-            "depreciation - interest expense, and ebitda = revenue - cogs - operating_expenses. "
-            "'_prior' fields are the previous fiscal year when shown. Missing and non-derivable -> nulls "
-            "with confidence 0. Never invent numbers.",
+            "Fill every field: text copied from the document; number normalized (dollars plain, percents "
+            "as fractions); page where found; confidence 0-1. On IRS forms: revenue = gross receipts line 1a/1c; "
+            "cogs = line 2; officer_comp = compensation of officers; address = the address block on page 1. "
+            "ebitda = operating income + depreciation if not stated; if only a combined 'total deductions' "
+            "line exists, operating_expenses = total deductions - depreciation - interest expense, and "
+            "ebitda = revenue - cogs - operating_expenses. '_prior' fields are the previous fiscal year when shown. "
+            "STRICT: every text value must appear verbatim (or near-verbatim) in the document. If it is not "
+            "in the document, the field is null with confidence 0 — a null is correct, a guess is a defect. "
+            "Never fill fields from general knowledge or from what similar documents usually say.",
             f"<document>\n{text[:120000]}\n</document>",
             BIZ_FIELD_SCHEMA,
             mock={k: {"text": None, "number": None, "confidence": 0.0, "page": None} for k in BIZ_FIELD_KEYS},
@@ -560,7 +574,14 @@ async def extract_om(file: UploadFile = File(...)):
             FIELD_SCHEMA,
             mock={k: {"text": None, "number": None, "confidence": 0.0, "page": None} for k in FIELD_KEYS},
         )
-    return {"kind": kind,
-            "source": {"filename": file.filename, "pages": n_pages,
-                       "ocr": f"{'mock' if MOCK else OCR_MODEL} + {LLM_MODEL.split('/')[-1]} · {n_pages} pages"},
-            "fields": fields}
+    result = {"kind": kind,
+              "source": {"filename": file.filename, "pages": n_pages,
+                         "ocr": f"{'mock' if MOCK else OCR_MODEL} + {LLM_MODEL.split('/')[-1]} · {n_pages} pages"},
+              "fields": fields}
+    if DEBUG_DIR:
+        try:
+            with open(os.path.join(DEBUG_DIR, "crescreener-last-extract.json"), "w") as fh:
+                json.dump(result, fh, indent=1)
+        except OSError:
+            pass
+    return result
