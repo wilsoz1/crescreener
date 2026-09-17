@@ -40,6 +40,10 @@ OCR_MODEL = os.environ.get("OCR_MODEL", "Unlimited-OCR")
 # Unlimited-OCR is trained on this exact phrase; generic vision models (e.g. qwen2.5vl
 # on Ollama) need an explicit transcription instruction instead.
 OCR_PROMPT = os.environ.get("OCR_PROMPT", "Multi page parsing.")
+# Pages per OCR call. Unlimited-OCR handles 8 and emits its own page structure; small
+# VLMs do best with 1 — the gateway then stamps an exact '=== PAGE n ===' per page,
+# which is what gives extractions their page citations.
+OCR_BATCH = max(int(os.environ.get("OCR_BATCH_PAGES", "8")), 1)
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://ngmpmyuwacwbwtqtinos.supabase.co").rstrip("/")
 SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 MOCK = os.environ.get("MOCK") == "1"
@@ -123,17 +127,19 @@ def ocr(data: bytes, filename: str, first_page_only: bool = False) -> str:
     if first_page_only:
         pages = pages[:1]
     chunks = []
-    for i in range(0, len(pages), 8):
+    for i in range(0, len(pages), OCR_BATCH):
+        batch = pages[i:i + OCR_BATCH]
         content = [{"type": "text", "text": OCR_PROMPT}] + [
             {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(p).decode()}}
-            for p in pages[i:i + 8]
+            for p in batch
         ]
         r = httpx.post(f"{OCR_BASE_URL}/chat/completions", timeout=1200, json={
             "model": OCR_MODEL, "temperature": 0, "max_tokens": 32768,
             "messages": [{"role": "user", "content": content}],
         })
         r.raise_for_status()
-        chunks.append(f"=== PAGE {i + 1}–{min(i + 8, len(pages))} ===\n" + r.json()["choices"][0]["message"]["content"])
+        label = f"=== PAGE {i + 1} ===" if len(batch) == 1 else f"=== PAGE {i + 1}–{i + len(batch)} ==="
+        chunks.append(label + "\n" + r.json()["choices"][0]["message"]["content"])
     return "\n".join(chunks)
 
 
