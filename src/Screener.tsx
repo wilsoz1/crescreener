@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { DealSheet, FIELD_DEFS, SECTIONS, DEFAULT_POLICY, Policy, underwrite, Field } from './types'
+import { DealSheet, FIELD_DEFS, SECTIONS, BIZ_FIELD_DEFS, SECTIONS_BIZ, DEFAULT_POLICY, Policy, underwrite, underwriteBiz, Field } from './types'
 import { API_URL, STEPS, extractMemo } from './api'
 import { loans } from './data'
 import { Ico } from './Icons'
@@ -23,11 +23,11 @@ export default function Screener({ org }: { org: Org | null }) {
   const [drag, setDrag] = useState(false)
   const input = useRef<HTMLInputElement>(null)
 
-  const run = async (file: File | null) => {
-    const name = file?.name ?? 'Mesa_Ridge_Dental_OM.pdf (sample)'
+  const run = async (file: File | null, sample?: 'om' | 'tax_return') => {
+    const name = file?.name ?? (sample === 'tax_return' ? 'Desert_Bloom_Dental_1120S_2026.pdf (sample)' : 'Mesa_Ridge_Dental_OM.pdf (sample)')
     setPhase({ kind: 'running', step: 0, name })
     try {
-      const deal = await extractMemo(file, step => setPhase({ kind: 'running', step, name }))
+      const deal = await extractMemo(file, step => setPhase({ kind: 'running', step, name }), sample)
       setPhase({ kind: 'done', deal })
     } catch (e) {
       setPhase({ kind: 'error', msg: (e as Error).message })
@@ -71,7 +71,8 @@ export default function Screener({ org }: { org: Org | null }) {
               <div className="drop-sub">PDF or scanned images · up to 600 pages · parsed one-shot by Unlimited-OCR</div>
               <div className="drop-actions">
                 <button className="btn-dark" onClick={e => { e.stopPropagation(); input.current?.click() }}>Choose file <Ico.plus /></button>
-                <button className="btn-light" onClick={e => { e.stopPropagation(); run(null) }}>Run sample OM</button>
+                <button className="btn-light" onClick={e => { e.stopPropagation(); run(null, 'om') }}>Sample: property OM</button>
+                <button className="btn-light" onClick={e => { e.stopPropagation(); run(null, 'tax_return') }}>Sample: practice tax return</button>
               </div>
               {phase.kind === 'error' && <div className="demo-note" style={{ marginTop: 16 }}>Extraction failed: {phase.msg}</div>}
             </>
@@ -85,53 +86,77 @@ export default function Screener({ org }: { org: Org | null }) {
 }
 
 function Results({ deal, org, policy, setPolicy, reset }: { deal: DealSheet; org: Org | null; policy: Policy; setPolicy: (p: Policy) => void; reset: () => void }) {
-  const metrics = underwrite(deal.fields, policy)
+  const biz = deal.kind === 'operating_company'
+  const metrics = biz ? underwriteBiz(deal.fields, policy) : underwrite(deal.fields, policy)
   const fails = metrics.filter(m => m.status === 'fail').length
   const lowConf = Object.values(deal.fields).filter(f => f.confidence < 0.9).length
   const [added, setAdded] = useState(false)
 
   const addToPipeline = async () => {
     const g = (k: string) => deal.fields[k]
-    const ltvS = metrics[0].value, dscrS = metrics[1].value
-    const sponsor = g('sponsor')?.text?.split(' (')[0] ?? 'New sponsor'
+    const dscrM = metrics.find(m => m.label.startsWith('DSCR'))?.value ?? '—'
+    const sponsor = (biz ? g('company_name')?.text : g('sponsor')?.text)?.split(' (')[0] ?? 'New borrower'
     const rate = g('rate_request')?.text?.split(' or ')[0] ?? null
     const term = g('loan_term')?.text?.replace(/-year term \/ /, ' / ').replace(/-year amortization/, '') ?? null
+    const ltvS = biz ? '—' : metrics[0].value
     const ltv = ltvS === '—' ? null : parseFloat(ltvS) / 100
-    const dscr = dscrS === '—' ? null : parseFloat(dscrS)
+    const dscr = dscrM === '—' ? null : parseFloat(dscrM)
     setAdded(true)
 
     if (org) {
-      // Signed in: the screened memo becomes a LOAN in the portfolio.
-      const property = g('property_name')?.text ?? 'property'
+      // Signed in: the screened document becomes a LOAN in the portfolio.
       const { data: cust } = await supabase.from('customers')
         .insert({ org_id: org.id, name: g('guarantor')?.text?.split(' (')[0] ?? sponsor, company: sponsor })
         .select().single()
+      const loanType = biz
+        ? (/start|new practice|de novo/i.test(g('loan_purpose')?.text ?? '') ? 'Start-up loan' : 'Expansion loan')
+        : 'Owner-Occupied CRE'
+      const collateral = biz
+        ? (g('collateral_offered')?.text ?? 'Practice assets')
+        : `1st DOT — ${g('property_name')?.text ?? 'property'}`
       const { data: newLoan } = await supabase.from('loans').insert({
         org_id: org.id, customer_id: cust?.id ?? null,
         loan_number: `CL-2026-${String(100 + Math.floor(Math.random() * 900))}`,
-        type: 'Owner-Occupied CRE', stage: 'Underwriting',
+        type: loanType, stage: 'Underwriting',
         amount: g('loan_amount')?.number ?? 0, rate, term,
-        ltv, dscr, rm: 'Unassigned',
-        collateral: `1st DOT — ${property}`,
+        ltv, dscr, rm: 'Unassigned', collateral,
       }).select().single()
       if (newLoan) {
         if (g('guarantor')?.text) {
           await supabase.from('guarantors').insert({
             org_id: org.id, loan_id: newLoan.id, name: g('guarantor')!.text!.split(' (')[0], guarantee_type: 'Unlimited',
+            net_worth: g('guarantor_net_worth')?.number ?? (biz ? null : g('sponsor_net_worth')?.number) ?? null,
+            liquidity: g('guarantor_liquidity')?.number ?? (biz ? null : g('sponsor_liquidity')?.number) ?? null,
           })
         }
-        toast('Loan created from the memo — now in your portfolio')
-        window.location.hash = `#/app/loans/${newLoan.id}`
+        // Operating company: the extraction IS the spread — file it on the borrower.
+        if (biz && cust) {
+          const line = (k: string) => g(k)?.number ?? null
+          await supabase.from('financial_spreads').insert({
+            org_id: org.id, customer_id: cust.id,
+            period: g('period_latest')?.text ?? 'Latest FY', statement_type: 'Tax Return', status: 'draft',
+            data: {
+              revenue: line('revenue'), cogs: line('cogs'), opex: line('operating_expenses'),
+              ebitda: line('ebitda'), depreciation: line('depreciation'), interest_expense: line('interest_expense'),
+              net_income: line('net_income'), distributions: line('distributions'),
+              total_debt: line('total_debt'), tangible_net_worth: line('tangible_net_worth'),
+            },
+          })
+        }
+        toast(biz ? 'Loan created — financials spread onto the borrower as a draft' : 'Loan created from the memo — now in your portfolio')
+        window.location.hash = `#/app/loans/${newLoan.id}${biz ? '/Spreads' : ''}`
       }
       return
     }
 
     loans.unshift({
-      id: `CL-2026-${String(80 + loans.length).padStart(3, '0')}`, borrower: sponsor, type: 'Owner-Occupied CRE',
+      id: `CL-2026-${String(80 + loans.length).padStart(3, '0')}`, borrower: sponsor,
+      type: biz ? 'Expansion loan' : 'Owner-Occupied CRE',
       amount: g('loan_amount')?.number ?? 0, stage: 'Application', rm: 'Unassigned', riskRating: 0,
       nextAction: `Screened from ${deal.source.filename} — ${fails ? `${fails} policy flag${fails > 1 ? 's' : ''}` : 'passes policy'}`,
       rate: rate ?? '—', term: term ?? '—', ltv: ltv === null ? null : ltv * 100, dscr,
-      maturity: '—', collateral: `1st DOT — ${g('property_name')?.text ?? 'property'}`,
+      maturity: '—',
+      collateral: biz ? (g('collateral_offered')?.text ?? 'Practice assets') : `1st DOT — ${g('property_name')?.text ?? 'property'}`,
     })
     toast('Sign up to save this loan to a portfolio')
     window.location.hash = '#/signup'
@@ -155,9 +180,10 @@ function Results({ deal, org, policy, setPolicy, reset }: { deal: DealSheet; org
         <div className="uw-head">
           <span><b>Underwriting</b> <span className="small">deterministic — recalculates as you change policy</span></span>
           <span className="policy">
-            <label>Max LTV <input type="number" value={Math.round(policy.maxLtv * 100)} onChange={e => setPolicy({ ...policy, maxLtv: +e.target.value / 100 })} />%</label>
+            {!biz && <label>Max LTV <input type="number" value={Math.round(policy.maxLtv * 100)} onChange={e => setPolicy({ ...policy, maxLtv: +e.target.value / 100 })} />%</label>}
             <label>Min DSCR <input type="number" step="0.05" value={policy.minDscr} onChange={e => setPolicy({ ...policy, minDscr: +e.target.value })} />x</label>
-            <label>Min debt yield <input type="number" step="0.5" value={+(policy.minDebtYield * 100).toFixed(1)} onChange={e => setPolicy({ ...policy, minDebtYield: +e.target.value / 100 })} />%</label>
+            {!biz && <label>Min debt yield <input type="number" step="0.5" value={+(policy.minDebtYield * 100).toFixed(1)} onChange={e => setPolicy({ ...policy, minDebtYield: +e.target.value / 100 })} />%</label>}
+            {biz && <label>Max Debt/EBITDA <input type="number" step="0.25" value={policy.maxLeverage} onChange={e => setPolicy({ ...policy, maxLeverage: +e.target.value })} />x</label>}
             <label>Rate <input type="number" step="0.125" value={+(policy.rate * 100).toFixed(3)} onChange={e => setPolicy({ ...policy, rate: +e.target.value / 100 })} />%</label>
             <label>Amort <input type="number" value={policy.amortYears} onChange={e => setPolicy({ ...policy, amortYears: +e.target.value })} />yr</label>
           </span>
@@ -182,9 +208,13 @@ function Results({ deal, org, policy, setPolicy, reset }: { deal: DealSheet; org
             <th className="num" style={{ width: 110 }}><span className="h"><Ico.doc /> Page</span></th>
           </tr></thead>
           <tbody>
-            {SECTIONS.map(sec => (
-              <SectionRows key={sec} title={sec} defs={FIELD_DEFS.filter(d => d.section === sec)} fields={deal.fields} />
-            ))}
+            {biz
+              ? SECTIONS_BIZ.map(sec => (
+                  <SectionRows key={sec} title={sec} defs={BIZ_FIELD_DEFS.filter(d => d.section === sec)} fields={deal.fields} />
+                ))
+              : SECTIONS.map(sec => (
+                  <SectionRows key={sec} title={sec} defs={FIELD_DEFS.filter(d => d.section === sec)} fields={deal.fields} />
+                ))}
           </tbody>
         </table>
       </div>
@@ -192,7 +222,7 @@ function Results({ deal, org, policy, setPolicy, reset }: { deal: DealSheet; org
   )
 }
 
-const SectionRows = ({ title, defs, fields }: { title: string; defs: typeof FIELD_DEFS; fields: Record<string, Field> }) => (
+const SectionRows = ({ title, defs, fields }: { title: string; defs: { key: string; label: string; fmt?: string }[]; fields: Record<string, Field> }) => (
   <>
     <tr className="section"><td colSpan={4}>{title}</td></tr>
     {defs.map(d => {

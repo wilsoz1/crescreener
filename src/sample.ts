@@ -5,6 +5,7 @@ import { DealSheet } from './types'
 const f = (text: string | null, number: number | null, confidence: number, page: number | null) => ({ text, number, confidence, page })
 
 export const SAMPLE_DEAL: DealSheet = {
+  kind: 'cre_property',
   source: { filename: 'Mesa_Ridge_Dental_OM.pdf', pages: 38, ocr: 'Unlimited-OCR · Multi page parsing · 38 pages · 41.2s' },
   fields: {
     property_name: f('Mesa Ridge Dental Building', null, 0.99, 1),
@@ -45,5 +46,46 @@ export const SAMPLE_DEAL: DealSheet = {
     guarantor: f('Dr. Ramona Delgado DDS (60%) · Dr. Mei Chen DMD (40%) — joint & several', null, 0.93, 31),
     sponsor_net_worth: f('$8,400,000 combined', 8400000, 0.84, 31),
     sponsor_liquidity: f('$1,100,000 combined', 1100000, 0.84, 31),
+  },
+}
+
+// Sample operating-company package: a practice tax return, fully spread.
+export const SAMPLE_BIZ_DEAL: DealSheet = {
+  kind: 'operating_company',
+  source: { filename: 'Desert_Bloom_Dental_1120S_2026.pdf', pages: 9, ocr: 'Unlimited-OCR · Multi page parsing · 9 pages · 12.8s' },
+  fields: {
+    company_name: f('Desert Bloom Dental Group PC', null, 0.99, 1),
+    entity_type: f('S corporation (1120-S)', null, 0.98, 1),
+    industry: f('General dentistry — 3 doctors', null, 0.95, 2),
+    address: f('7420 W Thunderbird Rd, Peoria, AZ 85381', null, 0.98, 1),
+    year_founded: f('Operating since 2011', null, 0.9, 2),
+    locations: f('2 offices (Peoria · Surprise)', null, 0.93, 2),
+    owners: f('Dr. Lena Marsh DDS (70%) · Dr. Omar Haddad DMD (30%)', null, 0.95, 2),
+    employee_count: f('24', 24, 0.88, 2),
+    period_latest: f('FY 2026', null, 0.98, 1),
+    revenue: f('$3,180,000', 3180000, 0.98, 3),
+    cogs: f('$540,000', 540000, 0.95, 3),
+    operating_expenses: f('$1,890,000', 1890000, 0.93, 3),
+    officer_comp: f('$420,000', 420000, 0.96, 3),
+    ebitda: f('$750,000', 750000, 0.9, 3),
+    depreciation: f('$156,000', 156000, 0.97, 3),
+    interest_expense: f('$88,000', 88000, 0.97, 3),
+    net_income: f('$506,000', 506000, 0.97, 3),
+    distributions: f('$210,000', 210000, 0.95, 4),
+    total_debt: f('$1,940,000', 1940000, 0.94, 5),
+    tangible_net_worth: f('$812,000', 812000, 0.94, 5),
+    period_prior: f('FY 2025', null, 0.98, 6),
+    revenue_prior: f('$2,890,000', 2890000, 0.96, 6),
+    ebitda_prior: f('$655,000', 655000, 0.88, 6),
+    net_income_prior: f('$433,000', 433000, 0.95, 6),
+    loan_amount: f('$1,850,000', 1850000, 0.97, 8),
+    loan_purpose: f('Acquire competing practice in Surprise; equip 4 operatories', null, 0.92, 8),
+    loan_term: f('10-year term / 15-year amortization', null, 0.9, 8),
+    rate_request: f('6.75% fixed requested', null, 0.85, 8),
+    equity_injection: f('$350,000', 350000, 0.9, 8),
+    collateral_offered: f('Practice assets + PMSI on new equipment; owner guarantees', null, 0.9, 8),
+    guarantor: f('Dr. Lena Marsh (70%) · Dr. Omar Haddad (30%) — joint & several', null, 0.93, 9),
+    guarantor_net_worth: f('$5,900,000 combined', 5900000, 0.85, 9),
+    guarantor_liquidity: f('$740,000 combined', 740000, 0.85, 9),
   },
 }

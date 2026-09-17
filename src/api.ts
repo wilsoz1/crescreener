@@ -1,5 +1,5 @@
 import { DealSheet } from './types'
-import { SAMPLE_DEAL } from './sample'
+import { SAMPLE_DEAL, SAMPLE_BIZ_DEAL } from './sample'
 import { supabase, SPREAD_DOC_TYPES } from './supabase'
 
 // Extraction API base URL: ?api=https://host → persisted to localStorage → VITE_API_URL → none (demo mode).
@@ -56,12 +56,14 @@ export async function aiProcessDocument(documentId: string, docType: string, has
 
 const wait = (ms: number) => new Promise(r => setTimeout(r, ms))
 
-/** Runs the pipeline; `onStep` is called as each stage begins (0-based). */
-export async function extractMemo(file: File | null, onStep: (i: number) => void): Promise<DealSheet> {
-  if (!API_URL || !file) {
-    // Demo mode — replay the bundled sample OM with realistic pacing.
+/** Runs the pipeline; `onStep` is called as each stage begins (0-based).
+ *  `sample` replays a bundled deal (works with or without an API configured). */
+export async function extractMemo(file: File | null, onStep: (i: number) => void, sample?: 'om' | 'tax_return'): Promise<DealSheet> {
+  if (!API_URL || !file || sample) {
+    // Demo mode — replay a bundled sample with realistic pacing.
+    const deal = sample === 'tax_return' ? SAMPLE_BIZ_DEAL : SAMPLE_DEAL
     for (let i = 0; i < STEPS.length; i++) { onStep(i); await wait(i === 1 ? 1800 : 900) }
-    return { ...SAMPLE_DEAL, source: { ...SAMPLE_DEAL.source, filename: file?.name ?? SAMPLE_DEAL.source.filename } }
+    return { ...deal, source: { ...deal.source, filename: file?.name ?? deal.source.filename } }
   }
   onStep(0)
   const body = new FormData()

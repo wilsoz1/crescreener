@@ -481,7 +481,25 @@ def ask(req: AskReq, orgs: List[str] = Depends(caller_orgs)):
     return {"answer": answer, "rows": rows, "plan": plan}
 
 
-# ——— Legacy screener endpoint (multipart) — same contract the frontend already uses ———
+# ——— Screener endpoint (multipart) — two tracks: CRE property vs. operating company ———
+
+MEMO_KIND_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "properties": {"kind": {"type": "string", "enum": ["cre_property", "operating_company"]},
+                   "confidence": {"type": "number"}},
+    "required": ["kind", "confidence"],
+}
+
+# Operating-company track: a tax return or practice/business package. The financial keys
+# mirror SPREAD_LINES so a created loan can carry a fully spread statement with it.
+BIZ_FIELD_KEYS = [
+    "company_name", "entity_type", "industry", "address", "year_founded", "locations", "owners", "employee_count",
+    "period_latest", "revenue", "cogs", "operating_expenses", "officer_comp", "ebitda", "depreciation",
+    "interest_expense", "net_income", "distributions", "total_debt", "tangible_net_worth",
+    "period_prior", "revenue_prior", "ebitda_prior", "net_income_prior",
+    "loan_amount", "loan_purpose", "loan_term", "rate_request", "equity_injection", "collateral_offered",
+    "guarantor", "guarantor_net_worth", "guarantor_liquidity",
+]
 
 FIELD_KEYS = ["property_name", "address", "property_type", "year_built", "building_sf", "land_acres", "units", "parking",
               "occupancy", "tenant_count", "anchor_tenants", "walt_years", "avg_rent_psf",
@@ -490,11 +508,15 @@ FIELD_KEYS = ["property_name", "address", "property_type", "year_built", "buildi
               "purchase_price", "price_psf", "cap_rate", "closing_date", "broker",
               "loan_amount", "loan_ltv", "loan_term", "rate_request", "equity", "use_of_proceeds",
               "sponsor", "sponsor_experience", "guarantor", "sponsor_net_worth", "sponsor_liquidity"]
-FIELD_SCHEMA = {"type": "object", "additionalProperties": False, "required": FIELD_KEYS, "properties": {
-    k: {"type": "object", "additionalProperties": False,
-        "properties": {"text": {"type": ["string", "null"]}, "number": {"type": ["number", "null"]},
-                       "confidence": {"type": "number"}, "page": {"type": ["integer", "null"]}},
-        "required": ["text", "number", "confidence", "page"]} for k in FIELD_KEYS}}
+def field_schema(keys: List[str]) -> Dict[str, Any]:
+    return {"type": "object", "additionalProperties": False, "required": keys, "properties": {
+        k: {"type": "object", "additionalProperties": False,
+            "properties": {"text": {"type": ["string", "null"]}, "number": {"type": ["number", "null"]},
+                           "confidence": {"type": "number"}, "page": {"type": ["integer", "null"]}},
+            "required": ["text", "number", "confidence", "page"]} for k in keys}}
+
+FIELD_SCHEMA = field_schema(FIELD_KEYS)
+BIZ_FIELD_SCHEMA = field_schema(BIZ_FIELD_KEYS)
 
 
 @app.post("/api/extract")
@@ -502,14 +524,43 @@ async def extract_om(file: UploadFile = File(...)):
     data = await file.read()
     text = ocr(data, file.filename or "memo.pdf")
     n_pages = max(text.count("=== PAGE"), 1)
-    fields = llm_json(
-        "You are a CRE credit analyst reading an offering memorandum (pages marked '=== PAGE n ==='). "
-        "Fill every field: text as written; number normalized (dollars plain, percents as fractions); "
-        "page where found; confidence 0-1. Missing -> nulls with confidence 0. Never invent numbers.",
-        f"<memo>\n{text[:120000]}\n</memo>",
-        FIELD_SCHEMA,
-        mock={k: {"text": None, "number": None, "confidence": 0.0, "page": None} for k in FIELD_KEYS},
+
+    # First decide what kind of deal this document describes — a property, or a company.
+    kind_out = llm_json(
+        "Decide what this lending document primarily describes. 'cre_property' = a real estate asset "
+        "(offering memorandum, appraisal, rent roll: building, tenants, NOI, cap rate). "
+        "'operating_company' = a business and its financials (tax return, financial statements, "
+        "practice or business acquisition package: revenue, EBITDA, owners).",
+        f"<document>\n{text[:12000]}\n</document>",
+        MEMO_KIND_SCHEMA,
+        mock={"kind": "cre_property", "confidence": 0.9},
     )
-    return {"source": {"filename": file.filename, "pages": n_pages,
+    kind = kind_out.get("kind", "cre_property")
+
+    if kind == "operating_company":
+        fields = llm_json(
+            "You are a commercial credit analyst spreading an operating company from its tax return, "
+            "financial statements or acquisition package (pages marked '=== PAGE n ==='). "
+            "Fill every field: text as written; number normalized (dollars plain, percents as fractions); "
+            "page where found; confidence 0-1. ebitda = operating income + depreciation if not stated; "
+            "if only a combined 'total deductions' line exists, operating_expenses = total deductions - "
+            "depreciation - interest expense, and ebitda = revenue - cogs - operating_expenses. "
+            "'_prior' fields are the previous fiscal year when shown. Missing and non-derivable -> nulls "
+            "with confidence 0. Never invent numbers.",
+            f"<document>\n{text[:120000]}\n</document>",
+            BIZ_FIELD_SCHEMA,
+            mock={k: {"text": None, "number": None, "confidence": 0.0, "page": None} for k in BIZ_FIELD_KEYS},
+        )
+    else:
+        fields = llm_json(
+            "You are a CRE credit analyst reading an offering memorandum (pages marked '=== PAGE n ==='). "
+            "Fill every field: text as written; number normalized (dollars plain, percents as fractions); "
+            "page where found; confidence 0-1. Missing -> nulls with confidence 0. Never invent numbers.",
+            f"<memo>\n{text[:120000]}\n</memo>",
+            FIELD_SCHEMA,
+            mock={k: {"text": None, "number": None, "confidence": 0.0, "page": None} for k in FIELD_KEYS},
+        )
+    return {"kind": kind,
+            "source": {"filename": file.filename, "pages": n_pages,
                        "ocr": f"{'mock' if MOCK else OCR_MODEL} + {LLM_MODEL.split('/')[-1]} · {n_pages} pages"},
             "fields": fields}
