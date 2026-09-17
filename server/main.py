@@ -273,8 +273,10 @@ def make_spread(req: DocReq, orgs: List[str] = Depends(caller_orgs)):
     out = llm_json(
         "You are a bank credit analyst spreading a borrower financial statement or tax return. "
         "Extract annual figures in dollars (plain numbers). ebitda = operating income + depreciation "
-        "if not stated. Use null for anything not present. period like 'FY 2026' or 'T-12 Jun 2026'. "
-        "confidence 0-1 for the overall extraction.",
+        "if not stated. Tax returns often show only a combined 'total deductions' line: then "
+        "opex = total deductions - depreciation - interest expense, and "
+        "ebitda = revenue - cogs - opex. Use null only for values that are neither stated nor "
+        "derivable. period like 'FY 2026' or 'T-12 Jun 2026'. confidence 0-1 for the overall extraction.",
         f"<document>\n{text}\n</document>",
         SPREAD_SCHEMA,
         mock={"revenue": 6050000, "cogs": 3960000, "opex": 1310000, "ebitda": 780000, "depreciation": 238000,
@@ -305,7 +307,13 @@ def classify(req: DocReq, orgs: List[str] = Depends(caller_orgs)):
     doc = fetch_document(req.document_id, orgs)
     text = ocr(download_storage(doc["storage_path"]), doc["filename"], first_page_only=True)
     out = llm_json(
-        "Classify this banking document and list every business/person entity name that appears.",
+        # Small models take the category list literally — spell out the mapping.
+        "You classify documents for a commercial-lending portfolio system. Choose doc_type strictly "
+        "from the allowed values. Mapping hints: any IRS form (1040, 1065, 1120, 1120-S, Schedule K-1) "
+        "is 'Tax Return'; a P&L, balance sheet or income statement is 'Financial Statement'; a property "
+        "valuation is 'Appraisal'; a certificate of insurance is 'Insurance Certificate'; an executed "
+        "credit or loan agreement is 'Loan Agreement'. Use 'Unclassified' ONLY if nothing fits. "
+        "Also list every business/person entity name that appears, and the period or date.",
         f"<first_page>\n{text[:6000]}\n</first_page>",
         CLASSIFY_SCHEMA,
         mock={"doc_type": "Tax Return", "entity_names": ["Cascade Fabrication Inc"], "period_or_date": "2026", "confidence": 0.95},
