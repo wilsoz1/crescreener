@@ -2,7 +2,9 @@
 // The backend returns `fields` keyed by FIELD_DEFS keys; the UI owns labels/sections and underwriting math.
 
 export type Field = { text: string | null; number: number | null; confidence: number; page: number | null }
-export type MemoKind = 'cre_property' | 'operating_company'
+export type MemoKind =
+  | 'cre_property' | 'operating_company' | 'personal_tax_return' | 'personal_financial_statement'
+  | 'bank_statement' | 'debt_schedule' | 'practice_production_report' | 'purchase_agreement' | 'other'
 export type DealSheet = {
   kind?: MemoKind // absent (older payloads) means cre_property
   source: { filename: string; pages: number; ocr: string }
@@ -97,6 +99,99 @@ export const BIZ_FIELD_DEFS: BizFieldDef[] = [
 ]
 
 export const SECTIONS_BIZ: BizSection[] = ['Company', 'Financials — latest year', 'Prior year', 'Loan Request', 'Guarantors']
+
+// ——— The rest of a screening package: one flat section per document kind ———
+
+type SimpleDef = { key: string; label: string; fmt?: 'money' | 'pct' | 'num' | 'x' | 'text' }
+export const KIND_META: Record<string, { label: string; defs: SimpleDef[] }> = {
+  cre_property: { label: 'Property offering memo', defs: [] },        // uses FIELD_DEFS
+  operating_company: { label: 'Business financials', defs: [] },      // uses BIZ_FIELD_DEFS
+  personal_tax_return: {
+    label: 'Personal tax return',
+    defs: [
+      { key: 'taxpayer_name', label: 'Taxpayer' }, { key: 'tax_year', label: 'Tax year' },
+      { key: 'filing_status', label: 'Filing status' }, { key: 'wages', label: 'Wages (W-2)', fmt: 'money' },
+      { key: 'business_income', label: 'Business income (Sch C)', fmt: 'money' },
+      { key: 'rental_income', label: 'Rental income (Sch E)', fmt: 'money' },
+      { key: 'k1_income', label: 'K-1 / pass-through income', fmt: 'money' },
+      { key: 'interest_dividends', label: 'Interest & dividends', fmt: 'money' },
+      { key: 'total_income', label: 'Total income', fmt: 'money' }, { key: 'agi', label: 'AGI', fmt: 'money' },
+      { key: 'total_tax', label: 'Total tax', fmt: 'money' },
+    ],
+  },
+  personal_financial_statement: {
+    label: 'Personal financial statement',
+    defs: [
+      { key: 'person_name', label: 'Name' }, { key: 'statement_date', label: 'Statement date' },
+      { key: 'total_assets', label: 'Total assets', fmt: 'money' },
+      { key: 'total_liabilities', label: 'Total liabilities', fmt: 'money' },
+      { key: 'net_worth', label: 'Net worth', fmt: 'money' },
+      { key: 'liquid_assets', label: 'Liquid assets', fmt: 'money' },
+      { key: 'real_estate_value', label: 'Real estate', fmt: 'money' },
+      { key: 'retirement_accounts', label: 'Retirement accounts', fmt: 'money' },
+      { key: 'annual_income', label: 'Annual income', fmt: 'money' },
+      { key: 'annual_debt_payments', label: 'Annual debt payments', fmt: 'money' },
+      { key: 'contingent_liabilities', label: 'Contingent liabilities' },
+    ],
+  },
+  bank_statement: {
+    label: 'Bank statement',
+    defs: [
+      { key: 'account_holder', label: 'Account holder' }, { key: 'bank_name', label: 'Bank' },
+      { key: 'account_type', label: 'Account type' }, { key: 'statement_period', label: 'Period' },
+      { key: 'beginning_balance', label: 'Beginning balance', fmt: 'money' },
+      { key: 'ending_balance', label: 'Ending balance', fmt: 'money' },
+      { key: 'total_deposits', label: 'Total deposits', fmt: 'money' },
+      { key: 'total_withdrawals', label: 'Total withdrawals', fmt: 'money' },
+      { key: 'average_balance', label: 'Average balance', fmt: 'money' },
+      { key: 'nsf_items', label: 'NSF / returned items', fmt: 'num' },
+    ],
+  },
+  debt_schedule: {
+    label: 'Debt schedule',
+    defs: [
+      { key: 'borrower_name', label: 'Borrower' }, { key: 'as_of_date', label: 'As of' },
+      { key: 'creditor_count', label: 'Creditors', fmt: 'num' },
+      { key: 'total_balance', label: 'Total balance', fmt: 'money' },
+      { key: 'total_monthly_payment', label: 'Total monthly payment', fmt: 'money' },
+      { key: 'total_annual_payment', label: 'Total annual payment', fmt: 'money' },
+      { key: 'largest_creditor', label: 'Largest creditor' },
+      { key: 'secured_balance', label: 'Secured balance', fmt: 'money' },
+      { key: 'notes_over_100k', label: 'Notes over $100K' },
+    ],
+  },
+  practice_production_report: {
+    label: 'Practice production report',
+    defs: [
+      { key: 'practice_name', label: 'Practice' }, { key: 'report_period', label: 'Period' },
+      { key: 'gross_production', label: 'Gross production', fmt: 'money' },
+      { key: 'collections', label: 'Collections', fmt: 'money' },
+      { key: 'collection_rate', label: 'Collection rate', fmt: 'pct' },
+      { key: 'adjustments', label: 'Adjustments', fmt: 'money' },
+      { key: 'active_patients', label: 'Active patients', fmt: 'num' },
+      { key: 'new_patients_monthly', label: 'New patients / month', fmt: 'num' },
+      { key: 'hygiene_production_pct', label: 'Hygiene production %', fmt: 'pct' },
+      { key: 'chair_utilization', label: 'Chair utilization', fmt: 'pct' },
+    ],
+  },
+  purchase_agreement: {
+    label: 'Purchase agreement / LOI',
+    defs: [
+      { key: 'buyer', label: 'Buyer' }, { key: 'seller', label: 'Seller' },
+      { key: 'target_name', label: 'Target' }, { key: 'purchase_price', label: 'Purchase price', fmt: 'money' },
+      { key: 'included_assets', label: 'Included assets' }, { key: 'excluded_assets', label: 'Excluded assets' },
+      { key: 'closing_date', label: 'Closing date' }, { key: 'earnest_money', label: 'Earnest money', fmt: 'money' },
+      { key: 'seller_financing', label: 'Seller financing' }, { key: 'noncompete_terms', label: 'Non-compete' },
+    ],
+  },
+  other: {
+    label: 'Document',
+    defs: [
+      { key: 'document_title', label: 'Title' }, { key: 'parties', label: 'Parties' },
+      { key: 'date', label: 'Date' }, { key: 'summary', label: 'Summary' },
+    ],
+  },
+}
 
 // ——— Underwriting (deterministic; bank policy defaults are editable in the UI) ———
 

@@ -494,9 +494,12 @@ def ask(req: AskReq, orgs: List[str] = Depends(caller_orgs)):
 
 # ——— Screener endpoint (multipart) — two tracks: CRE property vs. operating company ———
 
+DOC_KINDS = ["cre_property", "operating_company", "personal_tax_return", "personal_financial_statement",
+             "bank_statement", "debt_schedule", "practice_production_report", "purchase_agreement", "other"]
+
 MEMO_KIND_SCHEMA = {
     "type": "object", "additionalProperties": False,
-    "properties": {"kind": {"type": "string", "enum": ["cre_property", "operating_company"]},
+    "properties": {"kind": {"type": "string", "enum": DOC_KINDS},
                    "confidence": {"type": "number"}},
     "required": ["kind", "confidence"],
 }
@@ -529,6 +532,51 @@ def field_schema(keys: List[str]) -> Dict[str, Any]:
 FIELD_SCHEMA = field_schema(FIELD_KEYS)
 BIZ_FIELD_SCHEMA = field_schema(BIZ_FIELD_KEYS)
 
+# The rest of a screening package: each document kind gets its own spread.
+KIND_SPECS: Dict[str, Dict[str, Any]] = {
+    "personal_tax_return": {
+        "keys": ["taxpayer_name", "tax_year", "filing_status", "wages", "business_income", "rental_income",
+                 "k1_income", "interest_dividends", "total_income", "agi", "total_tax"],
+        "hints": "A Form 1040 (with schedules). wages = line 1; k1_income = Schedule E part II; "
+                 "business_income = Schedule C; agi = adjusted gross income line; total_tax = total tax line.",
+    },
+    "personal_financial_statement": {
+        "keys": ["person_name", "statement_date", "total_assets", "total_liabilities", "net_worth",
+                 "liquid_assets", "real_estate_value", "retirement_accounts", "annual_income",
+                 "annual_debt_payments", "contingent_liabilities"],
+        "hints": "A personal financial statement. liquid_assets = cash + marketable securities; "
+                 "net_worth = total assets - total liabilities (verify it ties).",
+    },
+    "bank_statement": {
+        "keys": ["account_holder", "bank_name", "account_type", "statement_period", "beginning_balance",
+                 "ending_balance", "total_deposits", "total_withdrawals", "average_balance", "nsf_items"],
+        "hints": "A bank statement. nsf_items = count of NSF / overdraft / returned-item fees in the period.",
+    },
+    "debt_schedule": {
+        "keys": ["borrower_name", "as_of_date", "creditor_count", "total_balance", "total_monthly_payment",
+                 "total_annual_payment", "largest_creditor", "secured_balance", "notes_over_100k"],
+        "hints": "A business debt schedule. Sum the rows for totals; total_annual_payment = "
+                 "total_monthly_payment x 12 if only monthly is shown.",
+    },
+    "practice_production_report": {
+        "keys": ["practice_name", "report_period", "gross_production", "collections", "collection_rate",
+                 "adjustments", "active_patients", "new_patients_monthly", "hygiene_production_pct",
+                 "chair_utilization"],
+        "hints": "A dental practice production/management report. collection_rate = collections / "
+                 "(production - adjustments), as a fraction.",
+    },
+    "purchase_agreement": {
+        "keys": ["buyer", "seller", "target_name", "purchase_price", "included_assets", "excluded_assets",
+                 "closing_date", "earnest_money", "seller_financing", "noncompete_terms"],
+        "hints": "A practice/business purchase agreement or LOI.",
+    },
+    "other": {
+        "keys": ["document_title", "parties", "date", "summary"],
+        "hints": "An uncategorized document: title it, name the parties, date it, and summarize in 1-2 sentences.",
+    },
+}
+KIND_SCHEMAS = {k: field_schema(v["keys"]) for k, v in KIND_SPECS.items()}
+
 
 @app.post("/api/extract")
 async def extract_om(file: UploadFile = File(...)):
@@ -536,17 +584,24 @@ async def extract_om(file: UploadFile = File(...)):
     text = ocr(data, file.filename or "memo.pdf")
     n_pages = max(text.count("=== PAGE"), 1)
 
-    # First decide what kind of deal this document describes — a property, or a company.
+    # First decide what kind of document this is — that picks the spread.
     kind_out = llm_json(
-        "Decide what this lending document primarily describes. 'cre_property' = a real estate asset "
-        "(offering memorandum, appraisal, rent roll: building, tenants, NOI, cap rate). "
-        "'operating_company' = a business and its financials (tax return, financial statements, "
-        "practice or business acquisition package: revenue, EBITDA, owners).",
+        "Classify this lending document. "
+        "'cre_property' = a real estate asset (offering memorandum, appraisal, rent roll). "
+        "'operating_company' = a BUSINESS's financials: business tax return (1120/1120-S/1065), "
+        "CPA or internal financial statements, or an acquisition package about the business. "
+        "'personal_tax_return' = an individual's Form 1040. "
+        "'personal_financial_statement' = an individual's PFS (assets/liabilities/net worth). "
+        "'bank_statement' = a bank account statement. "
+        "'debt_schedule' = a listing of a borrower's existing debts. "
+        "'practice_production_report' = a dental/medical practice production or management report. "
+        "'purchase_agreement' = a purchase agreement or LOI for a business or practice. "
+        "'other' = none of these.",
         f"<document>\n{text[:12000]}\n</document>",
         MEMO_KIND_SCHEMA,
         mock={"kind": "cre_property", "confidence": 0.9},
     )
-    kind = kind_out.get("kind", "cre_property")
+    kind = kind_out.get("kind", "other")
 
     if kind == "operating_company":
         fields = llm_json(
@@ -565,7 +620,7 @@ async def extract_om(file: UploadFile = File(...)):
             BIZ_FIELD_SCHEMA,
             mock={k: {"text": None, "number": None, "confidence": 0.0, "page": None} for k in BIZ_FIELD_KEYS},
         )
-    else:
+    elif kind == "cre_property":
         fields = llm_json(
             "You are a CRE credit analyst reading an offering memorandum (pages marked '=== PAGE n ==='). "
             "Fill every field: text as written; number normalized (dollars plain, percents as fractions); "
@@ -573,6 +628,19 @@ async def extract_om(file: UploadFile = File(...)):
             f"<memo>\n{text[:120000]}\n</memo>",
             FIELD_SCHEMA,
             mock={k: {"text": None, "number": None, "confidence": 0.0, "page": None} for k in FIELD_KEYS},
+        )
+    else:
+        spec = KIND_SPECS[kind]
+        fields = llm_json(
+            "You are a commercial credit analyst extracting a lending document (pages marked '=== PAGE n ==='). "
+            f"{spec['hints']} "
+            "Fill every field: text copied from the document; number normalized (dollars plain, percents as "
+            "fractions); page where found; confidence 0-1. "
+            "STRICT: every value must appear in (or be directly computable from) the document. If it is not "
+            "there, the field is null with confidence 0 — a null is correct, a guess is a defect.",
+            f"<document>\n{text[:120000]}\n</document>",
+            KIND_SCHEMAS[kind],
+            mock={k: {"text": None, "number": None, "confidence": 0.0, "page": None} for k in spec["keys"]},
         )
     result = {"kind": kind,
               "source": {"filename": file.filename, "pages": n_pages,
